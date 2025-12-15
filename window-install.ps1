@@ -42,7 +42,7 @@ function Add-ToPath {
     }
 }
 
-# dsclaude 명령어 생성
+# dsclaude 명령어 생성 (.cmd만 사용 - 실행정책 문제 회피)
 function Install-DsClaude {
     Write-Step "dsclaude 명령어 생성 중..."
     
@@ -53,7 +53,14 @@ function Install-DsClaude {
         New-Item -ItemType Directory -Path $binPath -Force | Out-Null
     }
     
-    # dsclaude.cmd 파일 생성
+    # 기존 .ps1 파일 제거 (실행정책 충돌 방지)
+    $oldPs1 = "$binPath\dsclaude.ps1"
+    if (Test-Path $oldPs1) {
+        Remove-Item $oldPs1 -Force
+        Write-Info "기존 dsclaude.ps1 제거됨 (실행정책 문제 방지)"
+    }
+    
+    # dsclaude.cmd 파일 생성 (실행정책 영향 안받음)
     $dsclaudeCmd = @"
 @echo off
 claude --dangerously-skip-permissions %*
@@ -61,15 +68,6 @@ claude --dangerously-skip-permissions %*
     
     $cmdPath = "$binPath\dsclaude.cmd"
     Set-Content -Path $cmdPath -Value $dsclaudeCmd -Encoding ASCII
-    
-    # PowerShell용 dsclaude.ps1도 생성
-    $dsclaudePs1 = @"
-# dsclaude - Claude Code with --dangerously-skip-permissions
-claude --dangerously-skip-permissions @args
-"@
-    
-    $ps1Path = "$binPath\dsclaude.ps1"
-    Set-Content -Path $ps1Path -Value $dsclaudePs1 -Encoding UTF8
     
     # PATH에 추가
     Add-ToPath $binPath
