@@ -3,6 +3,7 @@
     Claude Code 원클릭 설치 스크립트 (Windows)
 .DESCRIPTION
     Git, Node.js, Claude Code를 자동으로 설치하고 PATH 설정까지 완료합니다.
+    dsclaude 명령어도 함께 설치됩니다.
 #>
 
 # 콘솔 출력 함수
@@ -38,6 +39,46 @@ function Add-ToPath {
     # 현재 세션에도 적용
     if ($env:Path -notlike "*$NewPath*") {
         $env:Path = "$env:Path;$NewPath"
+    }
+}
+
+# dsclaude 명령어 생성
+function Install-DsClaude {
+    Write-Step "dsclaude 명령어 생성 중..."
+    
+    # 저장할 디렉토리 (사용자 로컬 bin)
+    $binPath = "$env:USERPROFILE\.local\bin"
+    
+    if (-not (Test-Path $binPath)) {
+        New-Item -ItemType Directory -Path $binPath -Force | Out-Null
+    }
+    
+    # dsclaude.cmd 파일 생성
+    $dsclaudeCmd = @"
+@echo off
+claude --dangerously-skip-permissions %*
+"@
+    
+    $cmdPath = "$binPath\dsclaude.cmd"
+    Set-Content -Path $cmdPath -Value $dsclaudeCmd -Encoding ASCII
+    
+    # PowerShell용 dsclaude.ps1도 생성
+    $dsclaudePs1 = @"
+# dsclaude - Claude Code with --dangerously-skip-permissions
+claude --dangerously-skip-permissions @args
+"@
+    
+    $ps1Path = "$binPath\dsclaude.ps1"
+    Set-Content -Path $ps1Path -Value $dsclaudePs1 -Encoding UTF8
+    
+    # PATH에 추가
+    Add-ToPath $binPath
+    
+    if (Test-Path $cmdPath) {
+        Write-Success "dsclaude 명령어 생성 완료!"
+        Write-Info "위치: $cmdPath"
+    } else {
+        Write-Error-Custom "dsclaude 생성 실패"
     }
 }
 
@@ -172,7 +213,11 @@ try {
     Write-Info "수동 설치: irm https://claude.ai/install.ps1 | iex"
 }
 
-# 5. 최종 PATH 확인 및 적용
+# 5. dsclaude 명령어 설치
+Write-Host ""
+Install-DsClaude
+
+# 6. 최종 PATH 확인 및 적용
 Write-Host ""
 Write-Step "PATH 설정 최종 확인..."
 
@@ -194,7 +239,12 @@ Write-Host "  ╚═════════════════════
 Write-Host ""
 Write-Host "  📌 중요: 새 PowerShell 창을 열어주세요!" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "  그 다음:" -ForegroundColor White
+Write-Host "  사용 가능한 명령어:" -ForegroundColor White
+Write-Host "     claude      - Claude Code 실행" -ForegroundColor Gray
+Write-Host "     dsclaude    - 권한 확인 스킵 모드" -ForegroundColor Gray
+Write-Host "                   (--dangerously-skip-permissions)" -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "  시작하기:" -ForegroundColor White
 Write-Host "     1. claude --version  (설치 확인)" -ForegroundColor Gray
 Write-Host "     2. claude            (시작 & 로그인)" -ForegroundColor Gray
 Write-Host ""
@@ -202,5 +252,5 @@ Write-Host ""
 # 새 터미널 열기 제안
 $openNew = Read-Host "새 PowerShell 창을 열까요? (Y/N)"
 if ($openNew -eq "Y" -or $openNew -eq "y") {
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "Write-Host '✅ Claude Code 준비 완료! claude 명령어를 입력하세요.' -ForegroundColor Green; Write-Host ''"
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "Write-Host '✅ Claude Code 준비 완료!' -ForegroundColor Green; Write-Host ''; Write-Host '사용 가능한 명령어:' -ForegroundColor Cyan; Write-Host '  claude    - Claude Code 실행' -ForegroundColor White; Write-Host '  dsclaude  - 권한 스킵 모드 (--dangerously-skip-permissions)' -ForegroundColor White; Write-Host ''"
 }
