@@ -179,6 +179,49 @@ else
     print_info "⚠️  새 터미널을 열어야 claude 명령어가 인식됩니다."
 fi
 
+# 6. dsclaude 명령어 생성
+echo ""
+print_step "dsclaude 명령어 생성 중..."
+
+# 저장할 디렉토리
+DSCLAUDE_BIN="$HOME/.local/bin"
+mkdir -p "$DSCLAUDE_BIN"
+
+# dsclaude 스크립트 생성
+cat > "$DSCLAUDE_BIN/dsclaude" << 'EOF'
+#!/bin/bash
+# dsclaude - Claude Code with --dangerously-skip-permissions
+claude --dangerously-skip-permissions "$@"
+EOF
+
+chmod +x "$DSCLAUDE_BIN/dsclaude"
+
+# PATH 추가 (없으면)
+if [[ ":$PATH:" != *":$DSCLAUDE_BIN:"* ]]; then
+    export PATH="$DSCLAUDE_BIN:$PATH"
+    
+    # .zshrc에 추가
+    if [ -f "$HOME/.zshrc" ]; then
+        if ! grep -q "$DSCLAUDE_BIN" "$HOME/.zshrc"; then
+            echo "export PATH=\"$DSCLAUDE_BIN:\$PATH\"" >> "$HOME/.zshrc"
+        fi
+    fi
+    
+    # .bashrc에 추가
+    if [ -f "$HOME/.bashrc" ]; then
+        if ! grep -q "$DSCLAUDE_BIN" "$HOME/.bashrc"; then
+            echo "export PATH=\"$DSCLAUDE_BIN:\$PATH\"" >> "$HOME/.bashrc"
+        fi
+    fi
+fi
+
+if [ -f "$DSCLAUDE_BIN/dsclaude" ]; then
+    print_success "dsclaude 명령어 생성 완료!"
+    print_info "위치: $DSCLAUDE_BIN/dsclaude"
+else
+    print_error "dsclaude 생성 실패"
+fi
+
 # ============================================================
 # 완료 메시지
 # ============================================================
@@ -190,7 +233,12 @@ echo -e "${GREEN}  ╚═══════════════════�
 echo ""
 echo -e "${YELLOW}  📌 중요: 새 터미널 창을 열어주세요!${NC}"
 echo ""
-echo -e "  그 다음:"
+echo -e "  사용 가능한 명령어:"
+echo -e "${GRAY}     claude     - Claude Code 실행${NC}"
+echo -e "${GRAY}     dsclaude   - 권한 확인 스킵 모드${NC}"
+echo -e "${GRAY}                  (--dangerously-skip-permissions)${NC}"
+echo ""
+echo -e "  시작하기:"
 echo -e "${GRAY}     1. claude --version  (설치 확인)${NC}"
 echo -e "${GRAY}     2. claude            (시작 & 로그인)${NC}"
 echo ""
