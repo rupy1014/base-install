@@ -23,19 +23,6 @@ function Test-NonAsciiPath {
     return $Path -match '[^\x00-\x7F]'
 }
 
-# npm.cmd 직접 실행 (실행 정책 우회)
-function Invoke-Npm {
-    param([string]$Arguments)
-    
-    $npmCmd = "$env:ProgramFiles\nodejs\npm.cmd"
-    if (-not (Test-Path $npmCmd)) {
-        $npmCmd = "npm.cmd"
-    }
-    
-    $result = & cmd.exe /c "$npmCmd $Arguments" 2>&1
-    return $result
-}
-
 # PATH 새로고침
 function Update-Path {
     $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
@@ -251,6 +238,22 @@ if ($installProcess.ExitCode -eq 0) {
     Write-Info "계속 진행합니다..."
 }
 
+# ============================================================
+# 6. .ps1 파일 삭제 (실행 정책 문제 해결)
+# ============================================================
+Write-Step ".ps1 파일 정리 중 (실행 정책 문제 방지)..."
+
+$ps1Files = Get-ChildItem -Path $NpmGlobalPath -Filter "*.ps1" -ErrorAction SilentlyContinue
+if ($ps1Files) {
+    foreach ($file in $ps1Files) {
+        Remove-Item $file.FullName -Force -ErrorAction SilentlyContinue
+        Write-Info "삭제됨: $($file.Name)"
+    }
+    Write-Success ".ps1 파일 정리 완료"
+} else {
+    Write-Info ".ps1 파일 없음"
+}
+
 # 설치 확인
 Write-Step "Claude Code 설치 확인 중..."
 
@@ -272,7 +275,7 @@ if (Test-Path $claudeCmd) {
 }
 
 # ============================================================
-# 6. dsclaude 래퍼 생성
+# 7. dsclaude 래퍼 생성
 # ============================================================
 Write-Step "dsclaude 래퍼 생성 중..."
 
@@ -298,7 +301,7 @@ if (Test-Path $dsclaudePath) {
 }
 
 # ============================================================
-# 7. 최종 PATH 설정 및 확인
+# 8. 최종 PATH 설정 및 확인
 # ============================================================
 Write-Step "최종 PATH 설정 중..."
 
