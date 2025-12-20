@@ -1,52 +1,26 @@
 <#
 .SYNOPSIS
-    Claude Code 원클릭 설치 스크립트 (Windows)
+    Claude Code 설치 스크립트 (한글 경로 완벽 지원)
 .DESCRIPTION
-    Git, Node.js, Claude Code를 자동으로 설치하고 PATH 설정까지 완료합니다.
-    
-    ⚠️ 한글 사용자 이름 디렉토리 문제 해결 버전 v3
-    ⚠️ PATH 설정 강화 (setx 직접 사용)
+    npm 전역 경로를 영문으로 변경하여 Claude Code를 설치합니다.
+    한글 사용자 이름으로 인한 경로 문제를 완전히 해결합니다.
 #>
 
-# UTF-8 인코딩 설정
+# UTF-8 인코딩
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-# 콘솔 출력 함수
-function Write-Step { param([string]$Message) Write-Host "▶ $Message" -ForegroundColor Yellow }
+# 출력 함수
+function Write-Step { param([string]$Message) Write-Host "`n▶ $Message" -ForegroundColor Yellow }
 function Write-Success { param([string]$Message) Write-Host "✅ $Message" -ForegroundColor Green }
 function Write-Error-Custom { param([string]$Message) Write-Host "❌ $Message" -ForegroundColor Red }
 function Write-Info { param([string]$Message) Write-Host "   $Message" -ForegroundColor Gray }
-function Write-Warning-Custom { param([string]$Message) Write-Host "⚠️  $Message" -ForegroundColor DarkYellow }
-function Write-Debug-Custom { param([string]$Message) Write-Host "   [DEBUG] $Message" -ForegroundColor DarkGray }
 
-# 명령어 존재 확인
 function Test-Command { param([string]$Command) return $null -ne (Get-Command $Command -ErrorAction SilentlyContinue) }
 
-# 경로에 비-ASCII 문자(한글 등) 포함 여부 확인
 function Test-NonAsciiPath {
     param([string]$Path)
     return $Path -match '[^\x00-\x7F]'
-}
-
-# 8.3 짧은 경로로 변환
-function Get-ShortPath {
-    param([string]$LongPath)
-    
-    if (-not (Test-Path $LongPath)) {
-        return $LongPath
-    }
-    
-    try {
-        $fso = New-Object -ComObject Scripting.FileSystemObject
-        if (Test-Path $LongPath -PathType Container) {
-            return $fso.GetFolder($LongPath).ShortPath
-        } else {
-            return $fso.GetFile($LongPath).ShortPath
-        }
-    } catch {
-        return $LongPath
-    }
 }
 
 # PATH 새로고침
@@ -56,343 +30,287 @@ function Update-Path {
     $env:Path = "$machinePath;$userPath"
 }
 
-# PATH에 경로 추가 (setx 직접 사용 - 가장 확실한 방법)
-function Add-ToPathWithSetx {
+# PATH에 영구 추가
+function Add-ToPathPermanent {
     param([string]$NewPath)
     
-    Write-Debug-Custom "추가할 경로: $NewPath"
+    if (-not (Test-Path $NewPath)) { return $false }
     
-    if (-not (Test-Path $NewPath)) { 
-        Write-Debug-Custom "경로가 존재하지 않음"
-        return $false 
-    }
+    $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
     
-    # 현재 User PATH 가져오기
-    $currentPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
-    Write-Debug-Custom "현재 User PATH 길이: $($currentPath.Length)"
-    
-    # 이미 존재하는지 확인
-    if ($currentPath -and $currentPath -like "*$NewPath*") {
+    if ($currentPath -like "*$NewPath*") {
         Write-Info "이미 PATH에 존재: $NewPath"
         return $true
     }
     
-    # 새 PATH 값 생성
     $newPathValue = if ($currentPath) { "$currentPath;$NewPath" } else { $NewPath }
     
-    Write-Debug-Custom "새 PATH 길이: $($newPathValue.Length)"
-    
-    # setx는 1024자 제한이 있음
-    if ($newPathValue.Length -gt 1024) {
-        Write-Warning-Custom "PATH가 1024자를 초과합니다. 레지스트리 직접 수정 시도..."
-        
-        try {
-            Set-ItemProperty -Path "HKCU:\Environment" -Name Path -Value $newPathValue -Type ExpandString
-            Write-Info "레지스트리로 PATH 설정됨"
-            
-            # 현재 세션에도 적용
-            $env:Path = "$env:Path;$NewPath"
-            return $true
-        } catch {
-            Write-Error-Custom "레지스트리 설정 실패: $_"
-            return $false
-        }
-    }
-    
-    # setx로 PATH 설정
-    Write-Debug-Custom "setx 실행 중..."
-    
     try {
-        $setxOutput = & setx PATH "$newPathValue" 2>&1
-        Write-Debug-Custom "setx 결과: $setxOutput"
-        
-        if ($LASTEXITCODE -eq 0 -or $setxOutput -match "SUCCESS|성공") {
-            Write-Info "setx로 PATH 설정됨: $NewPath"
-            
-            # 현재 세션에도 적용
-            $env:Path = "$env:Path;$NewPath"
-            return $true
-        } else {
-            Write-Warning-Custom "setx 실패, 레지스트리 직접 수정 시도..."
-            
-            Set-ItemProperty -Path "HKCU:\Environment" -Name Path -Value $newPathValue -Type ExpandString
-            $env:Path = "$env:Path;$NewPath"
-            return $true
-        }
+        [Environment]::SetEnvironmentVariable("Path", $newPathValue, "User")
+        $env:Path = "$env:Path;$NewPath"
+        Write-Info "PATH 추가됨: $NewPath"
+        return $true
     } catch {
         Write-Error-Custom "PATH 설정 실패: $_"
         return $false
     }
 }
 
-# 안전한 bin 디렉토리
-function Get-SafeBinPath {
-    $globalBin = "C:\claude-code\bin"
-    
-    if (-not (Test-Path $globalBin)) {
-        New-Item -ItemType Directory -Path $globalBin -Force | Out-Null
-        Write-Info "디렉토리 생성: $globalBin"
-    }
-    
-    return $globalBin
-}
+# ============================================================
+# 설정
+# ============================================================
 
-# Claude Code 실행 파일 찾기
-function Find-ClaudeExecutable {
-    $possiblePaths = @(
-        "$env:LOCALAPPDATA\Programs\claude-code\claude.exe",
-        "$env:LOCALAPPDATA\Microsoft\WindowsApps\claude.exe",
-        "$env:USERPROFILE\.claude\bin\claude.exe",
-        "$env:USERPROFILE\.local\bin\claude.exe",
-        "C:\Program Files\claude-code\claude.exe",
-        "C:\claude-code\claude.exe"
-    )
-    
-    foreach ($path in $possiblePaths) {
-        Write-Debug-Custom "검색 중: $path"
-        if (Test-Path $path) {
-            return $path
-        }
-    }
-    
-    # LOCALAPPDATA 하위 검색
-    $searchPath = "$env:LOCALAPPDATA\Programs"
-    if (Test-Path $searchPath) {
-        Write-Debug-Custom "하위 폴더 검색: $searchPath"
-        $found = Get-ChildItem -Path $searchPath -Filter "claude.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found) {
-            return $found.FullName
-        }
-    }
-    
-    return $null
-}
-
-# Claude 래퍼 스크립트 생성
-function Install-ClaudeWrapper {
-    param([string]$ClaudeExePath)
-    
-    Write-Step "claude 래퍼 생성 중..."
-    
-    $binPath = Get-SafeBinPath
-    
-    if (-not $ClaudeExePath -or -not (Test-Path $ClaudeExePath)) {
-        Write-Error-Custom "Claude 실행 파일 없음: $ClaudeExePath"
-        return $false
-    }
-    
-    # Short Path 변환
-    $safeClaudePath = $ClaudeExePath
-    if (Test-NonAsciiPath $ClaudeExePath) {
-        $shortPath = Get-ShortPath $ClaudeExePath
-        if ($shortPath -and -not (Test-NonAsciiPath $shortPath)) {
-            $safeClaudePath = $shortPath
-            Write-Info "Short Path 변환: $shortPath"
-        } else {
-            Write-Warning-Custom "Short Path 변환 실패"
-        }
-    }
-    
-    # claude.cmd 생성
-    $wrapperContent = @"
-@echo off
-chcp 65001 >nul 2>&1
-"$safeClaudePath" %*
-"@
-    
-    $wrapperPath = "$binPath\claude.cmd"
-    Set-Content -Path $wrapperPath -Value $wrapperContent -Encoding ASCII -Force
-    
-    Write-Debug-Custom "claude.cmd 내용:"
-    Write-Debug-Custom $wrapperContent
-    
-    if (Test-Path $wrapperPath) {
-        Write-Success "claude.cmd 생성됨: $wrapperPath"
-        return $true
-    }
-    return $false
-}
-
-# dsclaude 래퍼 생성
-function Install-DsClaude {
-    param([string]$ClaudeExePath)
-    
-    Write-Step "dsclaude 래퍼 생성 중..."
-    
-    $binPath = Get-SafeBinPath
-    
-    $safeClaudePath = $ClaudeExePath
-    if ($ClaudeExePath -and (Test-NonAsciiPath $ClaudeExePath)) {
-        $shortPath = Get-ShortPath $ClaudeExePath
-        if ($shortPath -and -not (Test-NonAsciiPath $shortPath)) {
-            $safeClaudePath = $shortPath
-        }
-    }
-    
-    $wrapperContent = @"
-@echo off
-chcp 65001 >nul 2>&1
-"$safeClaudePath" --dangerously-skip-permissions %*
-"@
-    
-    $wrapperPath = "$binPath\dsclaude.cmd"
-    Set-Content -Path $wrapperPath -Value $wrapperContent -Encoding ASCII -Force
-    
-    if (Test-Path $wrapperPath) {
-        Write-Success "dsclaude.cmd 생성됨: $wrapperPath"
-        return $true
-    }
-    return $false
-}
+$NpmGlobalPath = "C:\npm-global"
+$ClaudeBinPath = "C:\claude-code\bin"
 
 # ============================================================
-# 메인 설치
+# 메인
 # ============================================================
 
 Clear-Host
 Write-Host ""
 Write-Host "  ╔══════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "  ║   Claude Code 설치 스크립트 v3           ║" -ForegroundColor Cyan
-Write-Host "  ║   (한글 경로 + PATH 강화 버전)           ║" -ForegroundColor Cyan
+Write-Host "  ║   Claude Code 설치 (한글 경로 지원)      ║" -ForegroundColor Cyan
 Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
 
+# 한글 경로 확인
 $isKoreanPath = Test-NonAsciiPath $env:USERPROFILE
 if ($isKoreanPath) {
-    Write-Warning-Custom "한글 사용자 이름 감지: $env:USERNAME"
-    Write-Info "래퍼를 C:\claude-code\bin에 생성합니다."
+    Write-Host "  ⚠️  한글 사용자 이름 감지: $env:USERNAME" -ForegroundColor Yellow
+    Write-Host "     npm 전역 경로를 $NpmGlobalPath 로 설정합니다." -ForegroundColor Gray
+    Write-Host ""
+} else {
+    Write-Host "  ℹ️  영문 경로입니다. 표준 설치를 진행합니다." -ForegroundColor Cyan
     Write-Host ""
 }
 
+# ============================================================
 # 1. winget 확인
+# ============================================================
 Write-Step "winget 확인 중..."
 if (-not (Test-Command "winget")) {
-    Write-Error-Custom "winget이 없습니다. Windows 10 1709+ 또는 Windows 11 필요"
-    Read-Host "Enter 키를 눌러 종료"
+    Write-Error-Custom "winget이 설치되어 있지 않습니다."
+    Write-Info "Windows 10 1709 이상 또는 Windows 11이 필요합니다."
+    Write-Info "Microsoft Store에서 'App Installer'를 설치해주세요."
+    Read-Host "Enter를 눌러 종료"
     exit 1
 }
 Write-Success "winget 확인됨"
 
+# ============================================================
 # 2. Git 설치
-Write-Host ""
+# ============================================================
 Write-Step "Git 확인 중..."
 Update-Path
+
 if (Test-Command "git") {
-    Write-Success "Git 이미 설치됨"
+    $gitVer = git --version 2>$null
+    Write-Success "Git 이미 설치됨 ($gitVer)"
 } else {
-    Write-Info "Git 설치 중..."
+    Write-Info "Git 설치 중... (1-2분 소요)"
     winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements --silent 2>$null
-    Start-Sleep -Seconds 2
+    
+    # Git PATH 추가
+    if (Test-Path "$env:ProgramFiles\Git\cmd") {
+        Add-ToPathPermanent "$env:ProgramFiles\Git\cmd" | Out-Null
+    }
+    
     Update-Path
+    
     if (Test-Command "git") {
         Write-Success "Git 설치 완료!"
     } else {
-        Write-Warning-Custom "Git 설치됨 (새 터미널에서 확인)"
+        Write-Info "Git 설치됨 (새 터미널에서 확인 필요)"
     }
 }
 
+# ============================================================
 # 3. Node.js 설치
-Write-Host ""
+# ============================================================
 Write-Step "Node.js 확인 중..."
 Update-Path
+
 if (Test-Command "node") {
     $nodeVer = node --version 2>$null
-    Write-Success "Node.js 이미 설치됨 ($nodeVer)"
-} else {
-    Write-Info "Node.js 설치 중..."
-    winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements --silent 2>$null
-    Start-Sleep -Seconds 2
-    Update-Path
-    if (Test-Command "node") {
-        Write-Success "Node.js 설치 완료!"
+    $versionNum = [int]($nodeVer -replace 'v(\d+)\..*', '$1')
+    if ($versionNum -ge 18) {
+        Write-Success "Node.js 이미 설치됨 ($nodeVer)"
     } else {
-        Write-Warning-Custom "Node.js 설치됨 (새 터미널에서 확인)"
+        Write-Info "Node.js 버전이 낮습니다 ($nodeVer). 업그레이드 중..."
+        winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements --silent 2>$null
+        Update-Path
+    }
+} else {
+    Write-Info "Node.js LTS 설치 중... (1-2분 소요)"
+    winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements --silent 2>$null
+    
+    if (Test-Path "$env:ProgramFiles\nodejs") {
+        Add-ToPathPermanent "$env:ProgramFiles\nodejs" | Out-Null
+    }
+    
+    Update-Path
+    
+    if (Test-Command "node") {
+        $nodeVer = node --version 2>$null
+        Write-Success "Node.js 설치 완료! ($nodeVer)"
+    } else {
+        Write-Error-Custom "Node.js 설치 실패"
+        Write-Info "수동 설치 필요: https://nodejs.org"
+        Read-Host "Enter를 눌러 종료"
+        exit 1
     }
 }
 
-# 4. Claude Code 설치
-Write-Host ""
-Write-Step "Claude Code 설치 중..."
+# npm 확인
+if (-not (Test-Command "npm")) {
+    Write-Error-Custom "npm을 찾을 수 없습니다."
+    Write-Info "Node.js를 다시 설치해주세요."
+    Read-Host "Enter를 눌러 종료"
+    exit 1
+}
 
-$claudeExePath = $null
+# ============================================================
+# 4. npm 전역 경로 설정 (한글 경로 우회)
+# ============================================================
+Write-Step "npm 전역 경로 설정 중..."
+
+# 디렉토리 생성
+if (-not (Test-Path $NpmGlobalPath)) {
+    New-Item -ItemType Directory -Path $NpmGlobalPath -Force | Out-Null
+    Write-Info "디렉토리 생성: $NpmGlobalPath"
+}
+
+# npm prefix 설정
+$currentPrefix = npm config get prefix 2>$null
+Write-Info "현재 npm prefix: $currentPrefix"
+
+if ($currentPrefix -ne $NpmGlobalPath) {
+    npm config set prefix $NpmGlobalPath
+    Write-Info "npm prefix 변경: $NpmGlobalPath"
+}
+
+# PATH에 추가
+Add-ToPathPermanent $NpmGlobalPath | Out-Null
+
+Write-Success "npm 전역 경로 설정 완료"
+
+# ============================================================
+# 5. Claude Code 설치 (npm)
+# ============================================================
+Write-Step "Claude Code 설치 중 (npm)..."
+Write-Info "npm install -g @anthropic-ai/claude-code"
+Write-Info "설치에 1-3분 정도 소요됩니다..."
 
 try {
-    Write-Info "공식 설치 스크립트 실행..."
-    $installScript = Invoke-RestMethod -Uri "https://claude.ai/install.ps1"
-    Invoke-Expression $installScript
+    $installResult = npm install -g @anthropic-ai/claude-code 2>&1
     
-    Start-Sleep -Seconds 3
-    
-    $claudeExePath = Find-ClaudeExecutable
-    
-    if ($claudeExePath) {
-        Write-Success "Claude Code 발견: $claudeExePath"
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "Claude Code npm 설치 완료!"
     } else {
-        Write-Error-Custom "Claude Code를 찾을 수 없습니다."
+        Write-Warning "npm 설치 경고 발생 (계속 진행)"
+        Write-Info $installResult
     }
 } catch {
-    Write-Error-Custom "Claude Code 설치 실패: $_"
+    Write-Error-Custom "npm 설치 실패: $_"
 }
 
-# 5. 래퍼 스크립트 생성
-Write-Host ""
-if ($claudeExePath) {
-    Install-ClaudeWrapper -ClaudeExePath $claudeExePath
-    Install-DsClaude -ClaudeExePath $claudeExePath
+# 설치 확인
+Write-Step "Claude Code 설치 확인 중..."
+
+$claudeCmd = "$NpmGlobalPath\claude.cmd"
+$claudeExe = "$NpmGlobalPath\claude.exe"
+
+$claudePath = $null
+if (Test-Path $claudeCmd) {
+    $claudePath = $claudeCmd
+    Write-Success "발견: $claudeCmd"
+} elseif (Test-Path $claudeExe) {
+    $claudePath = $claudeExe
+    Write-Success "발견: $claudeExe"
 } else {
-    Write-Warning-Custom "Claude를 찾지 못해 래퍼 생성 불가"
+    # node_modules 내부 검색
+    $nodeModulesPath = "$NpmGlobalPath\node_modules\@anthropic-ai\claude-code"
+    if (Test-Path $nodeModulesPath) {
+        Write-Info "패키지 설치됨: $nodeModulesPath"
+        
+        # bin 파일 검색
+        $binFiles = Get-ChildItem -Path $NpmGlobalPath -Filter "claude*" -ErrorAction SilentlyContinue
+        if ($binFiles) {
+            $claudePath = $binFiles[0].FullName
+            Write-Success "발견: $claudePath"
+        }
+    }
 }
 
-# 6. PATH 설정 (핵심!)
-Write-Host ""
-Write-Step "PATH 설정 중..."
+if (-not $claudePath) {
+    Write-Error-Custom "Claude Code 설치 파일을 찾을 수 없습니다."
+    Write-Info "다음 경로를 확인해주세요: $NpmGlobalPath"
+    Get-ChildItem $NpmGlobalPath -ErrorAction SilentlyContinue | ForEach-Object { Write-Info "  $($_.Name)" }
+}
 
-$safeBin = Get-SafeBinPath
+# ============================================================
+# 6. dsclaude 래퍼 생성
+# ============================================================
+Write-Step "dsclaude 래퍼 생성 중..."
 
-# 파일 존재 확인
-Write-Info "파일 확인:"
-Write-Info "  claude.cmd: $(Test-Path "$safeBin\claude.cmd")"
-Write-Info "  dsclaude.cmd: $(Test-Path "$safeBin\dsclaude.cmd")"
+if (-not (Test-Path $ClaudeBinPath)) {
+    New-Item -ItemType Directory -Path $ClaudeBinPath -Force | Out-Null
+}
 
-# PATH 추가
-$pathResult = Add-ToPathWithSetx -NewPath $safeBin
+# dsclaude.cmd 생성
+$dsclaudeContent = @"
+@echo off
+chcp 65001 >nul 2>&1
+claude --dangerously-skip-permissions %*
+"@
 
-if ($pathResult) {
-    Write-Success "PATH 설정 완료"
+$dsclaudePath = "$ClaudeBinPath\dsclaude.cmd"
+Set-Content -Path $dsclaudePath -Value $dsclaudeContent -Encoding ASCII -Force
+
+if (Test-Path $dsclaudePath) {
+    Write-Success "dsclaude.cmd 생성됨: $dsclaudePath"
+    Add-ToPathPermanent $ClaudeBinPath | Out-Null
 } else {
-    Write-Error-Custom "PATH 자동 설정 실패"
+    Write-Error-Custom "dsclaude.cmd 생성 실패"
 }
 
-# 7. PATH 검증
-Write-Host ""
-Write-Step "PATH 검증 중..."
+# ============================================================
+# 7. 최종 PATH 설정 및 확인
+# ============================================================
+Write-Step "최종 PATH 설정 중..."
 
-# 레지스트리에서 확인
-$regPath = (Get-ItemProperty -Path "HKCU:\Environment" -Name Path -ErrorAction SilentlyContinue).Path
-$pathInRegistry = $regPath -like "*$safeBin*"
+# 모든 경로 추가 확인
+Add-ToPathPermanent $NpmGlobalPath | Out-Null
+Add-ToPathPermanent $ClaudeBinPath | Out-Null
 
-Write-Info "레지스트리 PATH에 포함: $pathInRegistry"
-Write-Info "현재 세션 PATH에 포함: $($env:Path -like "*$safeBin*")"
+Update-Path
 
-if (-not $pathInRegistry) {
-    Write-Host ""
-    Write-Warning-Custom "PATH 자동 등록이 실패했습니다!"
-    Write-Host ""
-    Write-Host "  ▼ 수동으로 PATH를 추가하세요 ▼" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  방법 1: PowerShell에서 실행" -ForegroundColor Cyan
-    Write-Host "  ─────────────────────────────────────────" -ForegroundColor DarkGray
-    Write-Host '  $oldPath = [Environment]::GetEnvironmentVariable("Path", "User")' -ForegroundColor White
-    Write-Host "  [Environment]::SetEnvironmentVariable(`"Path`", `"`$oldPath;$safeBin`", `"User`")" -ForegroundColor White
-    Write-Host ""
-    Write-Host "  방법 2: 시스템 설정에서 추가" -ForegroundColor Cyan
-    Write-Host "  ─────────────────────────────────────────" -ForegroundColor DarkGray
-    Write-Host "  1. Win + R → sysdm.cpl → Enter" -ForegroundColor White
-    Write-Host "  2. [고급] 탭 → [환경 변수] 버튼" -ForegroundColor White
-    Write-Host "  3. 사용자 변수에서 'Path' 선택 → [편집]" -ForegroundColor White
-    Write-Host "  4. [새로 만들기] → $safeBin 입력" -ForegroundColor White
-    Write-Host "  5. [확인] 클릭" -ForegroundColor White
-    Write-Host ""
+# PATH 검증
+Write-Step "설치 검증 중..."
+
+$verifyOk = $true
+
+# npm 전역 경로 확인
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -like "*$NpmGlobalPath*") {
+    Write-Success "npm 전역 경로 PATH 등록됨"
+} else {
+    Write-Error-Custom "npm 전역 경로 PATH 등록 실패"
+    $verifyOk = $false
+}
+
+# claude 명령어 테스트
+Write-Info "claude 명령어 테스트..."
+try {
+    $claudeVersion = & claude --version 2>$null
+    if ($claudeVersion) {
+        Write-Success "claude 명령어 작동: $claudeVersion"
+    } else {
+        Write-Info "claude 명령어 응답 없음 (새 터미널에서 확인 필요)"
+    }
+} catch {
+    Write-Info "claude 테스트 실패 (새 터미널에서 확인 필요)"
 }
 
 # ============================================================
@@ -404,25 +322,32 @@ Write-Host "  ╔═════════════════════
 Write-Host "  ║            설치 완료! 🎉                 ║" -ForegroundColor Green
 Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Green
 Write-Host ""
-Write-Host "  📌 반드시 새 터미널을 열어주세요!" -ForegroundColor Yellow
+Write-Host "  📌 중요: 새 PowerShell/터미널 창을 열어주세요!" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "  명령어:" -ForegroundColor White
+Write-Host "  설치된 명령어:" -ForegroundColor White
 Write-Host "     claude      - Claude Code 실행" -ForegroundColor Gray
 Write-Host "     dsclaude    - 권한 스킵 모드" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  설치 위치:" -ForegroundColor White
-Write-Host "     래퍼: $safeBin" -ForegroundColor Gray
-if ($claudeExePath) {
-    Write-Host "     실제: $claudeExePath" -ForegroundColor Gray
-}
+Write-Host "  설치 경로:" -ForegroundColor White
+Write-Host "     npm 전역: $NpmGlobalPath" -ForegroundColor Gray
+Write-Host "     dsclaude: $ClaudeBinPath" -ForegroundColor Gray
+Write-Host ""
+Write-Host "  시작하기:" -ForegroundColor White
+Write-Host "     1. 새 터미널 열기" -ForegroundColor Gray
+Write-Host "     2. claude --version" -ForegroundColor Gray
+Write-Host "     3. claude" -ForegroundColor Gray
 Write-Host ""
 
-# 직접 실행 테스트 제안
-Write-Host "  💡 지금 바로 테스트하려면:" -ForegroundColor Cyan
-Write-Host "     & '$safeBin\claude.cmd' --version" -ForegroundColor White
-Write-Host ""
+if (-not $verifyOk) {
+    Write-Host "  ⚠️  PATH 등록이 실패한 경우 수동 추가:" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  # PowerShell에서 실행:" -ForegroundColor Cyan
+    Write-Host "  `$p = [Environment]::GetEnvironmentVariable('Path', 'User')" -ForegroundColor White
+    Write-Host "  [Environment]::SetEnvironmentVariable('Path', `"`$p;$NpmGlobalPath;$ClaudeBinPath`", 'User')" -ForegroundColor White
+    Write-Host ""
+}
 
 $openNew = Read-Host "새 PowerShell을 열까요? (Y/N)"
 if ($openNew -eq "Y" -or $openNew -eq "y") {
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "& '$safeBin\claude.cmd' --version; Write-Host ''; Write-Host '사용: claude, dsclaude' -ForegroundColor Cyan"
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "Write-Host '✅ Claude Code 테스트' -ForegroundColor Green; claude --version; Write-Host ''; Write-Host '사용: claude, dsclaude' -ForegroundColor Cyan"
 }
