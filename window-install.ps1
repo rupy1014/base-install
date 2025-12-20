@@ -23,6 +23,19 @@ function Test-NonAsciiPath {
     return $Path -match '[^\x00-\x7F]'
 }
 
+# npm.cmd 직접 실행 (실행 정책 우회)
+function Invoke-Npm {
+    param([string]$Arguments)
+    
+    $npmCmd = "$env:ProgramFiles\nodejs\npm.cmd"
+    if (-not (Test-Path $npmCmd)) {
+        $npmCmd = "npm.cmd"
+    }
+    
+    $result = & cmd.exe /c "$npmCmd $Arguments" 2>&1
+    return $result
+}
+
 # PATH 새로고침
 function Update-Path {
     $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
@@ -131,8 +144,15 @@ if (Test-Command "git") {
 Write-Step "Node.js 확인 중..."
 Update-Path
 
-if (Test-Command "node") {
-    $nodeVer = node --version 2>$null
+$nodeExists = $false
+try {
+    $nodeVer = & cmd.exe /c "node --version" 2>$null
+    if ($nodeVer -match "^v\d+") {
+        $nodeExists = $true
+    }
+} catch { }
+
+if ($nodeExists) {
     $versionNum = [int]($nodeVer -replace 'v(\d+)\..*', '$1')
     if ($versionNum -ge 18) {
         Write-Success "Node.js 이미 설치됨 ($nodeVer)"
@@ -151,19 +171,34 @@ if (Test-Command "node") {
     
     Update-Path
     
-    if (Test-Command "node") {
-        $nodeVer = node --version 2>$null
-        Write-Success "Node.js 설치 완료! ($nodeVer)"
-    } else {
-        Write-Error-Custom "Node.js 설치 실패"
-        Write-Info "수동 설치 필요: https://nodejs.org"
+    # 다시 확인
+    try {
+        $nodeVer = & cmd.exe /c "node --version" 2>$null
+        if ($nodeVer) {
+            Write-Success "Node.js 설치 완료! ($nodeVer)"
+        } else {
+            Write-Error-Custom "Node.js 설치 실패"
+            Read-Host "Enter를 눌러 종료"
+            exit 1
+        }
+    } catch {
+        Write-Error-Custom "Node.js 확인 실패"
         Read-Host "Enter를 눌러 종료"
         exit 1
     }
 }
 
 # npm 확인
-if (-not (Test-Command "npm")) {
+$npmExists = $false
+try {
+    $npmVer = & cmd.exe /c "npm --version" 2>$null
+    if ($npmVer -match "^\d+") {
+        $npmExists = $true
+        Write-Info "npm 버전: $npmVer"
+    }
+} catch { }
+
+if (-not $npmExists) {
     Write-Error-Custom "npm을 찾을 수 없습니다."
     Write-Info "Node.js를 다시 설치해주세요."
     Read-Host "Enter를 눌러 종료"
@@ -181,13 +216,16 @@ if (-not (Test-Path $NpmGlobalPath)) {
     Write-Info "디렉토리 생성: $NpmGlobalPath"
 }
 
-# npm prefix 설정
-$currentPrefix = npm config get prefix 2>$null
+# 현재 npm prefix 확인
+$currentPrefix = & cmd.exe /c "npm config get prefix" 2>$null
+$currentPrefix = $currentPrefix.Trim()
 Write-Info "현재 npm prefix: $currentPrefix"
 
+# npm prefix 설정
 if ($currentPrefix -ne $NpmGlobalPath) {
-    npm config set prefix $NpmGlobalPath
-    Write-Info "npm prefix 변경: $NpmGlobalPath"
+    Write-Info "npm prefix 변경 중..."
+    & cmd.exe /c "npm config set prefix $NpmGlobalPath"
+    Write-Info "npm prefix 변경됨: $NpmGlobalPath"
 }
 
 # PATH에 추가
@@ -201,52 +239,36 @@ Write-Success "npm 전역 경로 설정 완료"
 Write-Step "Claude Code 설치 중 (npm)..."
 Write-Info "npm install -g @anthropic-ai/claude-code"
 Write-Info "설치에 1-3분 정도 소요됩니다..."
+Write-Host ""
 
-try {
-    $installResult = npm install -g @anthropic-ai/claude-code 2>&1
-    
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "Claude Code npm 설치 완료!"
-    } else {
-        Write-Warning "npm 설치 경고 발생 (계속 진행)"
-        Write-Info $installResult
-    }
-} catch {
-    Write-Error-Custom "npm 설치 실패: $_"
+# cmd.exe를 통해 npm 실행 (실행 정책 우회)
+$installProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c npm install -g @anthropic-ai/claude-code" -Wait -PassThru -NoNewWindow
+
+if ($installProcess.ExitCode -eq 0) {
+    Write-Success "Claude Code npm 설치 완료!"
+} else {
+    Write-Info "npm 설치 종료 코드: $($installProcess.ExitCode)"
+    Write-Info "계속 진행합니다..."
 }
 
 # 설치 확인
 Write-Step "Claude Code 설치 확인 중..."
 
 $claudeCmd = "$NpmGlobalPath\claude.cmd"
-$claudeExe = "$NpmGlobalPath\claude.exe"
 
-$claudePath = $null
 if (Test-Path $claudeCmd) {
-    $claudePath = $claudeCmd
     Write-Success "발견: $claudeCmd"
-} elseif (Test-Path $claudeExe) {
-    $claudePath = $claudeExe
-    Write-Success "발견: $claudeExe"
 } else {
-    # node_modules 내부 검색
+    Write-Info "$NpmGlobalPath 내용:"
+    Get-ChildItem $NpmGlobalPath -ErrorAction SilentlyContinue | ForEach-Object { Write-Info "  $($_.Name)" }
+    
+    # node_modules 확인
     $nodeModulesPath = "$NpmGlobalPath\node_modules\@anthropic-ai\claude-code"
     if (Test-Path $nodeModulesPath) {
-        Write-Info "패키지 설치됨: $nodeModulesPath"
-        
-        # bin 파일 검색
-        $binFiles = Get-ChildItem -Path $NpmGlobalPath -Filter "claude*" -ErrorAction SilentlyContinue
-        if ($binFiles) {
-            $claudePath = $binFiles[0].FullName
-            Write-Success "발견: $claudePath"
-        }
+        Write-Info "패키지는 설치됨: $nodeModulesPath"
+    } else {
+        Write-Error-Custom "Claude Code 패키지를 찾을 수 없습니다."
     }
-}
-
-if (-not $claudePath) {
-    Write-Error-Custom "Claude Code 설치 파일을 찾을 수 없습니다."
-    Write-Info "다음 경로를 확인해주세요: $NpmGlobalPath"
-    Get-ChildItem $NpmGlobalPath -ErrorAction SilentlyContinue | ForEach-Object { Write-Info "  $($_.Name)" }
 }
 
 # ============================================================
@@ -262,7 +284,7 @@ if (-not (Test-Path $ClaudeBinPath)) {
 $dsclaudeContent = @"
 @echo off
 chcp 65001 >nul 2>&1
-claude --dangerously-skip-permissions %*
+"$NpmGlobalPath\claude.cmd" --dangerously-skip-permissions %*
 "@
 
 $dsclaudePath = "$ClaudeBinPath\dsclaude.cmd"
@@ -280,7 +302,6 @@ if (Test-Path $dsclaudePath) {
 # ============================================================
 Write-Step "최종 PATH 설정 중..."
 
-# 모든 경로 추가 확인
 Add-ToPathPermanent $NpmGlobalPath | Out-Null
 Add-ToPathPermanent $ClaudeBinPath | Out-Null
 
@@ -303,11 +324,11 @@ if ($userPath -like "*$NpmGlobalPath*") {
 # claude 명령어 테스트
 Write-Info "claude 명령어 테스트..."
 try {
-    $claudeVersion = & claude --version 2>$null
+    $claudeVersion = & cmd.exe /c "claude --version" 2>$null
     if ($claudeVersion) {
         Write-Success "claude 명령어 작동: $claudeVersion"
     } else {
-        Write-Info "claude 명령어 응답 없음 (새 터미널에서 확인 필요)"
+        Write-Info "claude 응답 없음 (새 터미널에서 확인 필요)"
     }
 } catch {
     Write-Info "claude 테스트 실패 (새 터미널에서 확인 필요)"
@@ -339,7 +360,7 @@ Write-Host "     3. claude" -ForegroundColor Gray
 Write-Host ""
 
 if (-not $verifyOk) {
-    Write-Host "  ⚠️  PATH 등록이 실패한 경우 수동 추가:" -ForegroundColor Yellow
+    Write-Host "  ⚠️  PATH 등록 실패 시 수동 추가:" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  # PowerShell에서 실행:" -ForegroundColor Cyan
     Write-Host "  `$p = [Environment]::GetEnvironmentVariable('Path', 'User')" -ForegroundColor White
