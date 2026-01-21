@@ -17,5 +17,5 @@ irm https://git.clauders.ai/jobdori/base-install/raw/main/window-install.ps1 | i
 터미널을 열고 아래 명령어를 입력하세요:
 
 ```bash
-curl -sL https://git.clauders.ai/jobdori/base-install/raw/main/mac-install.sh | bash
+curl -fsSL https://git.clauders.ai/jobdori/base-install/raw/main/mac-install.sh | bash
 ```
