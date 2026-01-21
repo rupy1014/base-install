@@ -437,21 +437,15 @@ if [ "$FINAL_CHECK_PASSED" = true ]; then
     echo -e "  ${CYAN}claude${NC}     - Claude Code 실행"
     echo -e "  ${CYAN}dsclaude${NC}   - 권한 확인 스킵 모드"
     echo ""
+    echo ""
     echo -e "${YELLOW}  3초 후 새 터미널이 열립니다...${NC}"
     sleep 3
 
     # 자동으로 새 터미널 열기 시도
-    if osascript -e 'tell application "Terminal"
-        do script "clear; echo \"✅ Claude Code 준비 완료!\"; echo \"\"; echo \"아래 명령어를 입력하세요:\"; echo \"\"; echo \"  claude       - Claude Code 실행\"; echo \"  dsclaude     - 권한 스킵 모드\"; echo \"\""
-        activate
-    end tell' 2>/dev/null; then
-        echo ""
-        echo -e "${GREEN}  새 터미널 창에서 claude 를 입력하세요!${NC}"
-    else
-        # osascript 실패 시 (권한 문제 등)
-        echo ""
-        echo -e "${YELLOW}  새 터미널 창을 열고 ${CYAN}claude${YELLOW} 를 입력하세요!${NC}"
-    fi
+    osascript -e 'tell application "Terminal" to do script ""' -e 'tell application "Terminal" to activate' 2>/dev/null || true
+
+    echo ""
+    echo -e "${GREEN}  새 터미널 창에서 claude 를 입력하세요!${NC}"
     echo ""
 else
     echo -e "${RED}  ╔══════════════════════════════════════════╗${NC}"
