@@ -36,6 +36,68 @@ command_exists() {
     command -v "$1" &> /dev/null
 }
 
+# 현재 쉘 설정 즉시 적용
+reload_shell_config() {
+    # 현재 세션에 PATH 즉시 적용
+    for rc_file in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
+        if [ -f "$rc_file" ]; then
+            eval "$(grep -E '^export PATH=|^eval ' "$rc_file" 2>/dev/null)" 2>/dev/null || true
+        fi
+    done
+
+    # fnm이 있으면 환경 설정
+    if [ -f "$HOME/.local/share/fnm/fnm" ]; then
+        eval "$($HOME/.local/share/fnm/fnm env)" 2>/dev/null || true
+    fi
+
+    # Homebrew 환경 설정
+    if [ -f "/opt/homebrew/bin/brew" ]; then
+        eval "$(/opt/homebrew/bin/brew shellenv)" 2>/dev/null || true
+    elif [ -f "/usr/local/bin/brew" ]; then
+        eval "$(/usr/local/bin/brew shellenv)" 2>/dev/null || true
+    fi
+}
+
+# .bash_profile에서 .bashrc를 source하도록 설정 (한 번만 실행)
+setup_bash_profile_source() {
+    if [ ! -f "$HOME/.bash_profile" ]; then
+        touch "$HOME/.bash_profile"
+    fi
+    # .bash_profile에서 .bashrc를 source하는 코드가 없으면 추가
+    if ! grep -q "source.*bashrc\|\..*bashrc" "$HOME/.bash_profile" 2>/dev/null; then
+        # 파일 맨 앞에 추가 (다른 설정보다 먼저 실행되도록)
+        local temp_file=$(mktemp)
+        echo '# Load .bashrc if it exists
+[ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
+' > "$temp_file"
+        cat "$HOME/.bash_profile" >> "$temp_file"
+        mv "$temp_file" "$HOME/.bash_profile"
+    fi
+}
+
+# 쉘 설정 파일에 PATH 추가하는 함수
+add_to_shell_config() {
+    local path_to_add="$1"
+    local export_line="export PATH=\"$path_to_add:\$PATH\""
+
+    # zsh 설정 (macOS 기본)
+    if [ ! -f "$HOME/.zshrc" ]; then
+        touch "$HOME/.zshrc"
+    fi
+    if ! grep -q "$path_to_add" "$HOME/.zshrc" 2>/dev/null; then
+        echo "$export_line" >> "$HOME/.zshrc"
+    fi
+
+    # bash 설정 - .bashrc에만 추가 (VSCode, non-login 쉘)
+    # .bash_profile은 .bashrc를 source하므로 여기만 추가하면 됨
+    if [ ! -f "$HOME/.bashrc" ]; then
+        touch "$HOME/.bashrc"
+    fi
+    if ! grep -q "$path_to_add" "$HOME/.bashrc" 2>/dev/null; then
+        echo "$export_line" >> "$HOME/.bashrc"
+    fi
+}
+
 # brew 명령어 찾기
 find_brew() {
     if command -v brew &> /dev/null; then
@@ -110,6 +172,9 @@ else
     print_info "Git은 Xcode CLT에 포함되어 있습니다."
 fi
 
+# bash 사용자를 위해 .bash_profile → .bashrc 연결 설정
+setup_bash_profile_source
+
 # 4. Node.js 설치
 echo ""
 print_step "Node.js 확인 중..."
@@ -132,26 +197,20 @@ install_node_with_fnm() {
         $FNM_PATH/fnm use lts-latest
         $FNM_PATH/fnm default lts-latest
 
-        # 쉘 설정에 fnm 추가
+        # 쉘 설정에 fnm 추가 (.zshrc와 .bashrc에만 - .bash_profile은 .bashrc를 source함)
         FNM_SETUP='
 # fnm (Node.js)
 export PATH="$HOME/.local/share/fnm:$PATH"
 eval "$(fnm env)"'
 
-        # .zshrc 설정
-        if [ ! -f "$HOME/.zshrc" ]; then
-            touch "$HOME/.zshrc"
-        fi
-        if ! grep -q "fnm env" "$HOME/.zshrc"; then
-            echo "$FNM_SETUP" >> "$HOME/.zshrc"
-        fi
-
-        # .bashrc 설정
-        if [ -f "$HOME/.bashrc" ]; then
-            if ! grep -q "fnm env" "$HOME/.bashrc"; then
-                echo "$FNM_SETUP" >> "$HOME/.bashrc"
+        for rc_file in "$HOME/.zshrc" "$HOME/.bashrc"; do
+            if [ ! -f "$rc_file" ]; then
+                touch "$rc_file"
             fi
-        fi
+            if ! grep -q "fnm env" "$rc_file" 2>/dev/null; then
+                echo "$FNM_SETUP" >> "$rc_file"
+            fi
+        done
 
         eval "$(fnm env)" 2>/dev/null
         return 0
@@ -226,31 +285,45 @@ for claude_path in "${CLAUDE_PATHS[@]}"; do
     if [ -d "$claude_path" ]; then
         if [[ ":$PATH:" != *":$claude_path:"* ]]; then
             export PATH="$claude_path:$PATH"
-
-            # .zshrc 설정
-            if [ ! -f "$HOME/.zshrc" ]; then
-                touch "$HOME/.zshrc"
-            fi
-            if ! grep -q "$claude_path" "$HOME/.zshrc"; then
-                echo "export PATH=\"$claude_path:\$PATH\"" >> "$HOME/.zshrc"
-            fi
-
-            # .bashrc 설정
-            if [ -f "$HOME/.bashrc" ]; then
-                if ! grep -q "$claude_path" "$HOME/.bashrc"; then
-                    echo "export PATH=\"$claude_path:\$PATH\"" >> "$HOME/.bashrc"
-                fi
-            fi
         fi
+        # 모든 쉘 설정 파일에 PATH 추가 (zsh, bash 모두 지원)
+        add_to_shell_config "$claude_path"
     fi
 done
 
+# 쉘 설정 즉시 적용
+reload_shell_config
+
+# Claude 실행 파일 직접 찾기
+find_claude() {
+    local paths=(
+        "$HOME/.claude/bin/claude"
+        "$HOME/.local/bin/claude"
+        "/opt/homebrew/bin/claude"
+        "/usr/local/bin/claude"
+    )
+    for p in "${paths[@]}"; do
+        if [ -x "$p" ]; then
+            echo "$p"
+            return 0
+        fi
+    done
+    return 1
+}
+
 sleep 2
-if command_exists claude; then
-    claude_ver=$(claude --version 2>/dev/null || echo "installed")
+CLAUDE_BIN=$(find_claude)
+if [ -n "$CLAUDE_BIN" ]; then
+    # PATH에 추가되어 있는지 확인하고, 없으면 추가
+    CLAUDE_DIR=$(dirname "$CLAUDE_BIN")
+    if [[ ":$PATH:" != *":$CLAUDE_DIR:"* ]]; then
+        export PATH="$CLAUDE_DIR:$PATH"
+    fi
+    claude_ver=$("$CLAUDE_BIN" --version 2>/dev/null || echo "installed")
     print_success "Claude Code 설치 완료! ($claude_ver)"
 else
-    print_info "설치 완료 (새 터미널에서 사용 가능)"
+    print_error "Claude Code 설치 실패 - 수동 설치가 필요합니다"
+    print_info "https://claude.ai/download 에서 직접 다운로드하세요"
 fi
 
 # 6. dsclaude 명령어 생성
@@ -269,34 +342,137 @@ chmod +x "$DSCLAUDE_BIN/dsclaude"
 
 if [[ ":$PATH:" != *":$DSCLAUDE_BIN:"* ]]; then
     export PATH="$DSCLAUDE_BIN:$PATH"
-
-    if [ ! -f "$HOME/.zshrc" ]; then
-        touch "$HOME/.zshrc"
-    fi
-    if ! grep -q "$DSCLAUDE_BIN" "$HOME/.zshrc"; then
-        echo "export PATH=\"$DSCLAUDE_BIN:\$PATH\"" >> "$HOME/.zshrc"
-    fi
 fi
+# 모든 쉘 설정 파일에 PATH 추가 (zsh, bash 모두 지원)
+add_to_shell_config "$DSCLAUDE_BIN"
 
 print_success "dsclaude 명령어 생성 완료!"
 
 # ============================================================
-# 완료
+# 최종 검증 및 완료
 # ============================================================
 
 echo ""
-echo -e "${GREEN}  ╔══════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}  ║            설치 완료!                    ║${NC}"
-echo -e "${GREEN}  ╚══════════════════════════════════════════╝${NC}"
+print_step "설치 검증 중..."
+
+# 모든 PATH 다시 한번 적용
+reload_shell_config
+
+# 최종 검증
+FINAL_CHECK_PASSED=true
+FINAL_CLAUDE_PATH=""
+SHELL_CONFIG_OK=true
+
+# 1. Claude 실행 파일 존재 확인
+if command_exists claude; then
+    FINAL_CLAUDE_PATH=$(command -v claude)
+    print_success "claude 실행 파일: $FINAL_CLAUDE_PATH"
+elif [ -n "$CLAUDE_BIN" ] && [ -x "$CLAUDE_BIN" ]; then
+    FINAL_CLAUDE_PATH="$CLAUDE_BIN"
+    print_success "claude 실행 파일: $FINAL_CLAUDE_PATH"
+else
+    print_error "claude 실행 파일을 찾을 수 없습니다"
+    FINAL_CHECK_PASSED=false
+fi
+
+# 2. 쉘 설정 파일에 PATH가 제대로 추가됐는지 확인 (새 터미널에서 작동하려면 필수)
+CLAUDE_DIR=$(dirname "$FINAL_CLAUDE_PATH" 2>/dev/null)
+if [ -n "$CLAUDE_DIR" ]; then
+    # zsh 설정 확인
+    if grep -q "$CLAUDE_DIR" "$HOME/.zshrc" 2>/dev/null; then
+        print_success "zsh 설정 완료 (~/.zshrc)"
+    else
+        print_error "zsh 설정 누락 (~/.zshrc에 PATH 없음)"
+        SHELL_CONFIG_OK=false
+    fi
+
+    # bash 설정 확인
+    if grep -q "$CLAUDE_DIR" "$HOME/.bashrc" 2>/dev/null; then
+        print_success "bash 설정 완료 (~/.bashrc)"
+    else
+        print_error "bash 설정 누락 (~/.bashrc에 PATH 없음)"
+        SHELL_CONFIG_OK=false
+    fi
+
+    # .bash_profile → .bashrc 연결 확인
+    if grep -q "bashrc" "$HOME/.bash_profile" 2>/dev/null; then
+        print_success "bash_profile → bashrc 연결됨"
+    else
+        print_error "bash_profile에서 bashrc를 source하지 않음"
+        SHELL_CONFIG_OK=false
+    fi
+fi
+
+# 3. dsclaude 명령어 확인
+if [ -x "$HOME/.local/bin/dsclaude" ]; then
+    print_success "dsclaude 명령어 확인됨"
+else
+    print_error "dsclaude 명령어를 찾을 수 없습니다"
+fi
+
+# 4. Node.js 확인
+if command_exists node; then
+    print_success "node 확인됨: $(node --version)"
+else
+    print_error "node 명령어를 찾을 수 없습니다"
+    FINAL_CHECK_PASSED=false
+fi
+
+# 쉘 설정 문제가 있으면 자동 복구 시도
+if [ "$SHELL_CONFIG_OK" = false ] && [ -n "$CLAUDE_DIR" ]; then
+    echo ""
+    print_step "쉘 설정 자동 복구 중..."
+    add_to_shell_config "$CLAUDE_DIR"
+    setup_bash_profile_source
+    print_success "쉘 설정 복구 완료"
+    SHELL_CONFIG_OK=true
+fi
+
 echo ""
-echo -e "${YELLOW}  중요: 새 터미널 창을 열어주세요!${NC}"
-echo ""
-echo -e "  사용법:"
-echo -e "${CYAN}     claude${NC}     - Claude Code 실행"
-echo -e "${CYAN}     dsclaude${NC}   - 권한 확인 스킵 모드"
-echo ""
-echo -e "  시작하기:"
-echo -e "${GRAY}     1. 새 터미널 열기${NC}"
-echo -e "${GRAY}     2. claude 입력${NC}"
-echo -e "${GRAY}     3. 로그인하면 끝!${NC}"
-echo ""
+if [ "$FINAL_CHECK_PASSED" = true ]; then
+    echo -e "${GREEN}  ╔══════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}  ║         ✅ 설치 완료!                    ║${NC}"
+    echo -e "${GREEN}  ╚══════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "  ${CYAN}claude${NC}     - Claude Code 실행"
+    echo -e "  ${CYAN}dsclaude${NC}   - 권한 확인 스킵 모드"
+    echo ""
+    echo -e "${YELLOW}  3초 후 새 터미널이 열립니다...${NC}"
+    sleep 3
+
+    # 자동으로 새 터미널 열기 시도
+    if osascript -e 'tell application "Terminal"
+        do script "clear; echo \"✅ Claude Code 준비 완료!\"; echo \"\"; echo \"아래 명령어를 입력하세요:\"; echo \"\"; echo \"  claude       - Claude Code 실행\"; echo \"  dsclaude     - 권한 스킵 모드\"; echo \"\""
+        activate
+    end tell' 2>/dev/null; then
+        echo ""
+        echo -e "${GREEN}  새 터미널 창에서 claude 를 입력하세요!${NC}"
+    else
+        # osascript 실패 시 (권한 문제 등)
+        echo ""
+        echo -e "${YELLOW}  새 터미널 창을 열고 ${CYAN}claude${YELLOW} 를 입력하세요!${NC}"
+    fi
+    echo ""
+else
+    echo -e "${RED}  ╔══════════════════════════════════════════╗${NC}"
+    echo -e "${RED}  ║       ⚠️  설치 중 문제 발생              ║${NC}"
+    echo -e "${RED}  ╚══════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${YELLOW}  해결 방법:${NC}"
+    echo ""
+    echo -e "  1. 터미널을 완전히 종료하고 다시 열기"
+    echo ""
+    echo -e "  2. 또는 쉘 설정 다시 로드:"
+    echo -e "${GRAY}     zsh 사용자:${NC}  ${CYAN}source ~/.zshrc${NC}"
+    echo -e "${GRAY}     bash 사용자:${NC} ${CYAN}source ~/.bash_profile${NC}"
+    echo ""
+    echo -e "  3. VSCode 터미널에서 안 되면:"
+    echo -e "${GRAY}     VSCode 완전 종료 후 다시 열기${NC}"
+    echo -e "${GRAY}     또는 터미널 설정에서 기본 쉘 확인${NC}"
+    echo ""
+    echo -e "  4. 그래도 안 되면 수동 설치:"
+    echo -e "${CYAN}     curl -fsSL https://claude.ai/install.sh | bash${NC}"
+    echo ""
+    echo -e "  문제가 계속되면: https://github.com/anthropics/claude-code/issues"
+    echo ""
+fi

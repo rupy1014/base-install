@@ -10,6 +10,21 @@
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
+# ============================================================
+# ExecutionPolicy 자동 설정 (PSSecurityException 방지)
+# ============================================================
+$currentPolicy = Get-ExecutionPolicy -Scope CurrentUser
+$policyChanged = $false
+
+if ($currentPolicy -eq "Restricted" -or $currentPolicy -eq "Undefined") {
+    try {
+        Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
+        $policyChanged = $true
+    } catch {
+        # 실패해도 설치는 계속 진행 (나중에 .ps1 삭제로 우회)
+    }
+}
+
 # 출력 함수
 function Write-Step { param([string]$Message) Write-Host "`n▶ $Message" -ForegroundColor Yellow }
 function Write-Success { param([string]$Message) Write-Host "✅ $Message" -ForegroundColor Green }
@@ -74,6 +89,12 @@ Write-Host "  ║   Claude Code 설치 (한글 경로 지원)      ║" -Foregro
 Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
 
+# ExecutionPolicy 변경 결과 표시
+if ($policyChanged) {
+    Write-Host "  ✅ PowerShell 보안 정책 자동 설정 완료 (RemoteSigned)" -ForegroundColor Green
+    Write-Host ""
+}
+
 # 한글 경로 확인
 $isKoreanPath = Test-NonAsciiPath $env:USERPROFILE
 if ($isKoreanPath) {
@@ -81,7 +102,7 @@ if ($isKoreanPath) {
     Write-Host "     npm 전역 경로를 $NpmGlobalPath 로 설정합니다." -ForegroundColor Gray
     Write-Host ""
 } else {
-    Write-Host "  ℹ️  영문 경로입니다. 표준 설치를 진행합니다." -ForegroundColor Cyan
+    Write-Host "  ℹ️  npm 전역 경로: $NpmGlobalPath" -ForegroundColor Cyan
     Write-Host ""
 }
 
@@ -362,6 +383,15 @@ Write-Host "     2. claude --version" -ForegroundColor Gray
 Write-Host "     3. claude" -ForegroundColor Gray
 Write-Host ""
 
+# ExecutionPolicy 최종 확인 (자동 설정 실패한 경우만 안내)
+$finalPolicy = Get-ExecutionPolicy -Scope CurrentUser
+if ($finalPolicy -eq "Restricted" -or $finalPolicy -eq "Undefined") {
+    Write-Host "  ⚠️  보안 정책 자동 설정 실패 - claude 실행 시 오류 발생 가능" -ForegroundColor Yellow
+    Write-Host "     해결: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned" -ForegroundColor Gray
+    Write-Host "     또는: cmd.exe에서 claude 실행" -ForegroundColor Gray
+    Write-Host ""
+}
+
 if (-not $verifyOk) {
     Write-Host "  ⚠️  PATH 등록 실패 시 수동 추가:" -ForegroundColor Yellow
     Write-Host ""
@@ -371,7 +401,12 @@ if (-not $verifyOk) {
     Write-Host ""
 }
 
-$openNew = Read-Host "새 PowerShell을 열까요? (Y/N)"
-if ($openNew -eq "Y" -or $openNew -eq "y") {
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "Write-Host '✅ Claude Code 테스트' -ForegroundColor Green; claude --version; Write-Host ''; Write-Host '사용: claude, dsclaude' -ForegroundColor Cyan"
-}
+Write-Host "  3초 후 새 PowerShell이 열립니다..." -ForegroundColor Yellow
+Start-Sleep -Seconds 3
+
+# 자동으로 새 PowerShell 열기
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "Clear-Host; Write-Host '✅ Claude Code 준비 완료!' -ForegroundColor Green; Write-Host ''; Write-Host '아래 명령어를 입력하세요:' -ForegroundColor White; Write-Host ''; Write-Host '  claude       - Claude Code 실행' -ForegroundColor Cyan; Write-Host '  dsclaude     - 권한 스킵 모드' -ForegroundColor Cyan; Write-Host ''"
+
+Write-Host ""
+Write-Host "  새 PowerShell 창에서 claude 를 입력하세요!" -ForegroundColor Green
+Write-Host ""
