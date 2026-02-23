@@ -45,26 +45,16 @@ reload_shell_config() {
         fi
     done
 
-    # fnm이 있으면 환경 설정
-    if [ -f "$HOME/.local/share/fnm/fnm" ]; then
+    # 직접 설치된 Node.js 경로
+    if [ -d "$HOME/.local/node/bin" ]; then
+        export PATH="$HOME/.local/node/bin:$PATH"
+    fi
+
+    # 기존 fnm 사용자 호환 (이전 버전 스크립트로 설치한 경우)
+    if ! command -v node &>/dev/null && [ -f "$HOME/.local/share/fnm/fnm" ]; then
         export PATH="$HOME/.local/share/fnm:$PATH"
         eval "$($HOME/.local/share/fnm/fnm env)" 2>/dev/null || true
         $HOME/.local/share/fnm/fnm use default 2>/dev/null || true
-
-        # fnm env/multishell이 실패할 경우 대비: node 바이너리 직접 탐색
-        if ! command -v node &>/dev/null; then
-            local fnm_default="$HOME/.local/share/fnm/aliases/default/bin"
-            if [ -d "$fnm_default" ]; then
-                export PATH="$fnm_default:$PATH"
-            else
-                # aliases가 없으면 설치된 버전 중 최신을 직접 찾기
-                local node_bin
-                node_bin=$(find "$HOME/.local/share/fnm/node-versions" -maxdepth 3 -name "node" -path "*/bin/node" 2>/dev/null | sort -V | tail -1)
-                if [ -n "$node_bin" ]; then
-                    export PATH="$(dirname "$node_bin"):$PATH"
-                fi
-            fi
-        fi
     fi
 
     # Homebrew 환경 설정
@@ -196,42 +186,42 @@ setup_bash_profile_source
 echo ""
 print_step "Node.js 확인 중..."
 
-install_node_with_fnm() {
-    print_info "fnm으로 Node.js 설치 중..."
+install_node_direct() {
+    print_info "공식 Node.js 바이너리 직접 설치 중..."
 
-    # fnm 설치
-    curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
-
-    # fnm 경로
-    FNM_PATH="$HOME/.local/share/fnm"
-
-    if [ -f "$FNM_PATH/fnm" ]; then
-        export PATH="$FNM_PATH:$PATH"
-        eval "$($FNM_PATH/fnm env)"
-
-        # Node.js LTS 설치
-        $FNM_PATH/fnm install --lts
-        $FNM_PATH/fnm use lts-latest
-        $FNM_PATH/fnm default lts-latest
-
-        # 쉘 설정에 fnm 추가 (.zshrc와 .bashrc에만 - .bash_profile은 .bashrc를 source함)
-        FNM_SETUP='
-# fnm (Node.js)
-export PATH="$HOME/.local/share/fnm:$PATH"
-eval "$(fnm env)"'
-
-        for rc_file in "$HOME/.zshrc" "$HOME/.bashrc"; do
-            if [ ! -f "$rc_file" ]; then
-                touch "$rc_file"
-            fi
-            if ! grep -q "fnm env" "$rc_file" 2>/dev/null; then
-                echo "$FNM_SETUP" >> "$rc_file"
-            fi
-        done
-
-        eval "$(fnm env)" 2>/dev/null
-        return 0
+    # macOS 아키텍처 감지
+    local arch
+    arch=$(uname -m)
+    if [ "$arch" = "arm64" ]; then
+        arch="arm64"
+    else
+        arch="x64"
     fi
+
+    local node_ver="v22.14.0"
+    local node_dir="node-${node_ver}-darwin-${arch}"
+    local node_url="https://nodejs.org/dist/${node_ver}/${node_dir}.tar.gz"
+    local install_dir="$HOME/.local/node"
+
+    # 다운로드 및 설치
+    local tmp_dir=$(mktemp -d)
+    if curl -fsSL "$node_url" -o "$tmp_dir/node.tar.gz"; then
+        tar -xzf "$tmp_dir/node.tar.gz" -C "$tmp_dir"
+        rm -rf "$install_dir"
+        mkdir -p "$HOME/.local"
+        mv "$tmp_dir/$node_dir" "$install_dir"
+        rm -rf "$tmp_dir"
+
+        # PATH에 추가
+        export PATH="$install_dir/bin:$PATH"
+        add_to_shell_config "$install_dir/bin"
+
+        if [ -x "$install_dir/bin/node" ]; then
+            return 0
+        fi
+    fi
+
+    rm -rf "$tmp_dir"
     return 1
 }
 
@@ -253,22 +243,17 @@ if [ "$NODE_OK" = false ]; then
         $BREW_CMD install node@20
         $BREW_CMD link node@20 --overwrite --force 2>/dev/null
     else
-        install_node_with_fnm
+        install_node_direct
     fi
 
     # 설치 확인
     if command_exists node; then
         node_ver=$(node --version)
         print_success "Node.js 설치 완료! ($node_ver)"
-    else
-        # fnm 경로 다시 확인
-        if [ -f "$HOME/.local/share/fnm/fnm" ]; then
-            eval "$($HOME/.local/share/fnm/fnm env)" 2>/dev/null
-            if command_exists node; then
-                node_ver=$(node --version)
-                print_success "Node.js 설치 완료! ($node_ver)"
-            fi
-        fi
+    elif [ -x "$HOME/.local/node/bin/node" ]; then
+        export PATH="$HOME/.local/node/bin:$PATH"
+        node_ver=$("$HOME/.local/node/bin/node" --version)
+        print_success "Node.js 설치 완료! ($node_ver)"
     fi
 fi
 
@@ -428,24 +413,8 @@ else
 fi
 
 # 4. Node.js 확인
-# fnm 환경이 제대로 안 잡힐 수 있으므로 직접 탐색
-if ! command_exists node && [ -f "$HOME/.local/share/fnm/fnm" ]; then
-    export PATH="$HOME/.local/share/fnm:$PATH"
-    eval "$($HOME/.local/share/fnm/fnm env)" 2>/dev/null || true
-    $HOME/.local/share/fnm/fnm use default 2>/dev/null || true
-
-    # 그래도 안 되면 node 바이너리 직접 찾기
-    if ! command_exists node; then
-        FNM_DEFAULT_BIN="$HOME/.local/share/fnm/aliases/default/bin"
-        if [ -d "$FNM_DEFAULT_BIN" ]; then
-            export PATH="$FNM_DEFAULT_BIN:$PATH"
-        else
-            NODE_BIN=$(find "$HOME/.local/share/fnm/node-versions" -maxdepth 3 -name "node" -path "*/bin/node" 2>/dev/null | sort -V | tail -1)
-            if [ -n "$NODE_BIN" ]; then
-                export PATH="$(dirname "$NODE_BIN"):$PATH"
-            fi
-        fi
-    fi
+if ! command_exists node && [ -x "$HOME/.local/node/bin/node" ]; then
+    export PATH="$HOME/.local/node/bin:$PATH"
 fi
 
 if command_exists node; then
