@@ -47,9 +47,24 @@ reload_shell_config() {
 
     # fnm이 있으면 환경 설정
     if [ -f "$HOME/.local/share/fnm/fnm" ]; then
+        export PATH="$HOME/.local/share/fnm:$PATH"
         eval "$($HOME/.local/share/fnm/fnm env)" 2>/dev/null || true
-        # fnm env 후 default 버전을 활성화해야 node가 PATH에 잡힘
         $HOME/.local/share/fnm/fnm use default 2>/dev/null || true
+
+        # fnm env/multishell이 실패할 경우 대비: node 바이너리 직접 탐색
+        if ! command -v node &>/dev/null; then
+            local fnm_default="$HOME/.local/share/fnm/aliases/default/bin"
+            if [ -d "$fnm_default" ]; then
+                export PATH="$fnm_default:$PATH"
+            else
+                # aliases가 없으면 설치된 버전 중 최신을 직접 찾기
+                local node_bin
+                node_bin=$(find "$HOME/.local/share/fnm/node-versions" -maxdepth 3 -name "node" -path "*/bin/node" 2>/dev/null | sort -V | tail -1)
+                if [ -n "$node_bin" ]; then
+                    export PATH="$(dirname "$node_bin"):$PATH"
+                fi
+            fi
+        fi
     fi
 
     # Homebrew 환경 설정
@@ -413,10 +428,24 @@ else
 fi
 
 # 4. Node.js 확인
-# fnm 환경이 제대로 안 잡힐 수 있으므로 한번 더 시도
+# fnm 환경이 제대로 안 잡힐 수 있으므로 직접 탐색
 if ! command_exists node && [ -f "$HOME/.local/share/fnm/fnm" ]; then
+    export PATH="$HOME/.local/share/fnm:$PATH"
     eval "$($HOME/.local/share/fnm/fnm env)" 2>/dev/null || true
     $HOME/.local/share/fnm/fnm use default 2>/dev/null || true
+
+    # 그래도 안 되면 node 바이너리 직접 찾기
+    if ! command_exists node; then
+        FNM_DEFAULT_BIN="$HOME/.local/share/fnm/aliases/default/bin"
+        if [ -d "$FNM_DEFAULT_BIN" ]; then
+            export PATH="$FNM_DEFAULT_BIN:$PATH"
+        else
+            NODE_BIN=$(find "$HOME/.local/share/fnm/node-versions" -maxdepth 3 -name "node" -path "*/bin/node" 2>/dev/null | sort -V | tail -1)
+            if [ -n "$NODE_BIN" ]; then
+                export PATH="$(dirname "$NODE_BIN"):$PATH"
+            fi
+        fi
+    fi
 fi
 
 if command_exists node; then
