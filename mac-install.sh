@@ -45,18 +45,6 @@ reload_shell_config() {
         fi
     done
 
-    # 직접 설치된 Node.js 경로
-    if [ -d "$HOME/.local/node/bin" ]; then
-        export PATH="$HOME/.local/node/bin:$PATH"
-    fi
-
-    # 기존 fnm 사용자 호환 (이전 버전 스크립트로 설치한 경우)
-    if ! command -v node &>/dev/null && [ -f "$HOME/.local/share/fnm/fnm" ]; then
-        export PATH="$HOME/.local/share/fnm:$PATH"
-        eval "$($HOME/.local/share/fnm/fnm env)" 2>/dev/null || true
-        $HOME/.local/share/fnm/fnm use default 2>/dev/null || true
-    fi
-
     # Homebrew 환경 설정
     if [ -f "/opt/homebrew/bin/brew" ]; then
         eval "$(/opt/homebrew/bin/brew shellenv)" 2>/dev/null || true
@@ -182,82 +170,7 @@ fi
 # bash 사용자를 위해 .bash_profile → .bashrc 연결 설정
 setup_bash_profile_source
 
-# 4. Node.js 설치
-echo ""
-print_step "Node.js 확인 중..."
-
-install_node_direct() {
-    print_info "공식 Node.js 바이너리 직접 설치 중..."
-
-    # macOS 아키텍처 감지
-    local arch
-    arch=$(uname -m)
-    if [ "$arch" = "arm64" ]; then
-        arch="arm64"
-    else
-        arch="x64"
-    fi
-
-    local node_ver="v22.14.0"
-    local node_dir="node-${node_ver}-darwin-${arch}"
-    local node_url="https://nodejs.org/dist/${node_ver}/${node_dir}.tar.gz"
-    local install_dir="$HOME/.local/node"
-
-    # 다운로드 및 설치
-    local tmp_dir=$(mktemp -d)
-    if curl -fsSL "$node_url" -o "$tmp_dir/node.tar.gz"; then
-        tar -xzf "$tmp_dir/node.tar.gz" -C "$tmp_dir"
-        rm -rf "$install_dir"
-        mkdir -p "$HOME/.local"
-        mv "$tmp_dir/$node_dir" "$install_dir"
-        rm -rf "$tmp_dir"
-
-        # PATH에 추가
-        export PATH="$install_dir/bin:$PATH"
-        add_to_shell_config "$install_dir/bin"
-
-        if [ -x "$install_dir/bin/node" ]; then
-            return 0
-        fi
-    fi
-
-    rm -rf "$tmp_dir"
-    return 1
-}
-
-NODE_OK=false
-if command_exists node; then
-    node_ver=$(node --version)
-    version_num=$(echo $node_ver | sed 's/v\([0-9]*\).*/\1/')
-
-    if [ "$version_num" -ge 18 ]; then
-        print_success "Node.js 설치됨 ($node_ver)"
-        NODE_OK=true
-    else
-        print_info "Node.js 버전이 낮습니다 ($node_ver). 업그레이드 중..."
-    fi
-fi
-
-if [ "$NODE_OK" = false ]; then
-    if [ "$USE_HOMEBREW" = true ]; then
-        $BREW_CMD install node@20
-        $BREW_CMD link node@20 --overwrite --force 2>/dev/null
-    else
-        install_node_direct
-    fi
-
-    # 설치 확인
-    if command_exists node; then
-        node_ver=$(node --version)
-        print_success "Node.js 설치 완료! ($node_ver)"
-    elif [ -x "$HOME/.local/node/bin/node" ]; then
-        export PATH="$HOME/.local/node/bin:$PATH"
-        node_ver=$("$HOME/.local/node/bin/node" --version)
-        print_success "Node.js 설치 완료! ($node_ver)"
-    fi
-fi
-
-# 5. Claude Code 설치
+# 4. Claude Code 설치
 echo ""
 print_step "Claude Code 설치 중..."
 
@@ -328,7 +241,7 @@ else
     print_info "https://claude.ai/download 에서 직접 다운로드하세요"
 fi
 
-# 6. dsclaude 명령어 생성
+# 5. dsclaude 명령어 생성
 echo ""
 print_step "dsclaude 명령어 생성 중..."
 
@@ -410,19 +323,6 @@ if [ -x "$HOME/.local/bin/dsclaude" ]; then
     print_success "dsclaude 명령어 확인됨"
 else
     print_error "dsclaude 명령어를 찾을 수 없습니다"
-fi
-
-# 4. Node.js 확인
-if ! command_exists node && [ -x "$HOME/.local/node/bin/node" ]; then
-    export PATH="$HOME/.local/node/bin:$PATH"
-fi
-
-if command_exists node; then
-    print_success "node 확인됨: $(node --version)"
-else
-    print_error "node 명령어를 찾을 수 없습니다"
-    print_info "새 터미널을 열면 정상 작동할 수 있습니다"
-    FINAL_CHECK_PASSED=false
 fi
 
 # 쉘 설정 문제가 있으면 자동 복구 시도
