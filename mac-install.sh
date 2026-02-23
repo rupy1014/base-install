@@ -48,6 +48,8 @@ reload_shell_config() {
     # fnm이 있으면 환경 설정
     if [ -f "$HOME/.local/share/fnm/fnm" ]; then
         eval "$($HOME/.local/share/fnm/fnm env)" 2>/dev/null || true
+        # fnm env 후 default 버전을 활성화해야 node가 PATH에 잡힘
+        $HOME/.local/share/fnm/fnm use default 2>/dev/null || true
     fi
 
     # Homebrew 환경 설정
@@ -411,10 +413,17 @@ else
 fi
 
 # 4. Node.js 확인
+# fnm 환경이 제대로 안 잡힐 수 있으므로 한번 더 시도
+if ! command_exists node && [ -f "$HOME/.local/share/fnm/fnm" ]; then
+    eval "$($HOME/.local/share/fnm/fnm env)" 2>/dev/null || true
+    $HOME/.local/share/fnm/fnm use default 2>/dev/null || true
+fi
+
 if command_exists node; then
     print_success "node 확인됨: $(node --version)"
 else
     print_error "node 명령어를 찾을 수 없습니다"
+    print_info "새 터미널을 열면 정상 작동할 수 있습니다"
     FINAL_CHECK_PASSED=false
 fi
 
