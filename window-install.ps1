@@ -107,17 +107,37 @@ if ($isKoreanPath) {
 }
 
 # ============================================================
-# 1. winget 확인
+# 1. winget 확인 (없으면 직접 다운로드 모드로 전환)
 # ============================================================
 Write-Step "winget 확인 중..."
-if (-not (Test-Command "winget")) {
-    Write-Error-Custom "winget이 설치되어 있지 않습니다."
-    Write-Info "Windows 10 1709 이상 또는 Windows 11이 필요합니다."
-    Write-Info "Microsoft Store에서 'App Installer'를 설치해주세요."
-    Read-Host "Enter를 눌러 종료"
-    exit 1
+$useWinget = Test-Command "winget"
+if ($useWinget) {
+    Write-Success "winget 확인됨"
+} else {
+    Write-Info "winget이 없습니다. 직접 다운로드 방식으로 설치합니다."
 }
-Write-Success "winget 확인됨"
+
+# 직접 다운로드 함수
+function Install-WithDirectDownload {
+    param(
+        [string]$Name,
+        [string]$Url,
+        [string]$OutFile,
+        [string]$Arguments
+    )
+    Write-Info "$Name 다운로드 중: $Url"
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $webClient = New-Object System.Net.WebClient
+        $webClient.DownloadFile($Url, $OutFile)
+        Write-Info "$Name 설치 중... (1-3분 소요)"
+        $proc = Start-Process -FilePath $OutFile -ArgumentList $Arguments -Wait -PassThru
+        return $proc.ExitCode -eq 0
+    } catch {
+        Write-Error-Custom "$Name 다운로드/설치 실패: $_"
+        return $false
+    }
+}
 
 # ============================================================
 # 2. Git 설치
@@ -129,16 +149,26 @@ if (Test-Command "git") {
     $gitVer = git --version 2>$null
     Write-Success "Git 이미 설치됨 ($gitVer)"
 } else {
-    Write-Info "Git 설치 중... (1-2분 소요)"
-    winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements --silent 2>$null
-    
+    if ($useWinget) {
+        Write-Info "Git 설치 중... (1-2분 소요)"
+        winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements --silent 2>$null
+    } else {
+        Write-Info "Git 직접 다운로드 설치 중..."
+        $gitInstaller = "$env:TEMP\Git-installer.exe"
+        Install-WithDirectDownload -Name "Git" `
+            -Url "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.2/Git-2.47.1.2-64-bit.exe" `
+            -OutFile $gitInstaller `
+            -Arguments "/VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /COMPONENTS=`"icons,ext\reg\shellhere,assoc,assoc_sh`"" | Out-Null
+        if (Test-Path $gitInstaller) { Remove-Item $gitInstaller -Force -ErrorAction SilentlyContinue }
+    }
+
     # Git PATH 추가
     if (Test-Path "$env:ProgramFiles\Git\cmd") {
         Add-ToPathPermanent "$env:ProgramFiles\Git\cmd" | Out-Null
     }
-    
+
     Update-Path
-    
+
     if (Test-Command "git") {
         Write-Success "Git 설치 완료!"
     } else {
@@ -166,19 +196,40 @@ if ($nodeExists) {
         Write-Success "Node.js 이미 설치됨 ($nodeVer)"
     } else {
         Write-Info "Node.js 버전이 낮습니다 ($nodeVer). 업그레이드 중..."
-        winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements --silent 2>$null
+        if ($useWinget) {
+            winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements --silent 2>$null
+        } else {
+            $nodeInstaller = "$env:TEMP\node-lts-installer.msi"
+            Install-WithDirectDownload -Name "Node.js" `
+                -Url "https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi" `
+                -OutFile $nodeInstaller `
+                -Arguments "/i `"$nodeInstaller`" /qn" | Out-Null
+            Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$nodeInstaller`" /qn" -Wait
+            if (Test-Path $nodeInstaller) { Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue }
+        }
         Update-Path
     }
 } else {
-    Write-Info "Node.js LTS 설치 중... (1-2분 소요)"
-    winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements --silent 2>$null
-    
+    if ($useWinget) {
+        Write-Info "Node.js LTS 설치 중... (1-2분 소요)"
+        winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements --silent 2>$null
+    } else {
+        Write-Info "Node.js LTS 직접 다운로드 설치 중..."
+        $nodeInstaller = "$env:TEMP\node-lts-installer.msi"
+        Install-WithDirectDownload -Name "Node.js" `
+            -Url "https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi" `
+            -OutFile $nodeInstaller `
+            -Arguments "/i `"$nodeInstaller`" /qn" | Out-Null
+        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$nodeInstaller`" /qn" -Wait
+        if (Test-Path $nodeInstaller) { Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue }
+    }
+
     if (Test-Path "$env:ProgramFiles\nodejs") {
         Add-ToPathPermanent "$env:ProgramFiles\nodejs" | Out-Null
     }
-    
+
     Update-Path
-    
+
     # 다시 확인
     try {
         $nodeVer = & cmd.exe /c "node --version" 2>$null
