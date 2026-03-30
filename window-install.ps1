@@ -326,54 +326,62 @@ Write-Success "npm 전역 경로 설정 완료"
 # ============================================================
 # 5. Claude Code 설치 (npm)
 # ============================================================
-Write-Step "Claude Code 설치 중 (npm)..."
-Write-Info "npm install -g @anthropic-ai/claude-code"
-Write-Info "설치에 1-3분 정도 소요됩니다..."
-Write-Host ""
-
-# cmd.exe를 통해 npm 실행 (실행 정책 우회)
-$installProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c npm install -g @anthropic-ai/claude-code" -Wait -PassThru -NoNewWindow
-
-if ($installProcess.ExitCode -eq 0) {
-    Write-Success "Claude Code npm 설치 완료!"
-} else {
-    Write-Info "npm 설치 종료 코드: $($installProcess.ExitCode)"
-    Write-Info "계속 진행합니다..."
-}
-
-# ============================================================
-# 6. .ps1 파일 삭제 (실행 정책 문제 해결)
-# ============================================================
-Write-Step ".ps1 파일 정리 중 (실행 정책 문제 방지)..."
-
-$ps1Files = Get-ChildItem -Path $NpmGlobalPath -Filter "*.ps1" -ErrorAction SilentlyContinue
-if ($ps1Files) {
-    foreach ($file in $ps1Files) {
-        Remove-Item $file.FullName -Force -ErrorAction SilentlyContinue
-        Write-Info "삭제됨: $($file.Name)"
-    }
-    Write-Success ".ps1 파일 정리 완료"
-} else {
-    Write-Info ".ps1 파일 없음"
-}
-
-# 설치 확인
-Write-Step "Claude Code 설치 확인 중..."
-
 $claudeCmd = "$NpmGlobalPath\claude.cmd"
+$alreadyInstalled = Test-Path $claudeCmd
 
-if (Test-Path $claudeCmd) {
+if ($alreadyInstalled) {
+    Write-Step "Claude Code 이미 설치됨 - 설치 스킵"
     Write-Success "발견: $claudeCmd"
 } else {
-    Write-Info "$NpmGlobalPath 내용:"
-    Get-ChildItem $NpmGlobalPath -ErrorAction SilentlyContinue | ForEach-Object { Write-Info "  $($_.Name)" }
-    
-    # node_modules 확인
-    $nodeModulesPath = "$NpmGlobalPath\node_modules\@anthropic-ai\claude-code"
-    if (Test-Path $nodeModulesPath) {
-        Write-Info "패키지는 설치됨: $nodeModulesPath"
+    Write-Step "Claude Code 설치 중 (npm)..."
+    Write-Info "npm install -g @anthropic-ai/claude-code"
+    Write-Info "설치에 1-3분 정도 소요됩니다..."
+    Write-Host ""
+
+    # cmd.exe를 통해 npm 실행 (실행 정책 우회)
+    $installProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c npm install -g @anthropic-ai/claude-code" -Wait -PassThru -NoNewWindow
+
+    if ($installProcess.ExitCode -eq 0) {
+        Write-Success "Claude Code npm 설치 완료!"
     } else {
-        Write-Error-Custom "Claude Code 패키지를 찾을 수 없습니다."
+        Write-Info "npm 설치 종료 코드: $($installProcess.ExitCode)"
+        Write-Info "계속 진행합니다..."
+    }
+}
+
+if (-not $alreadyInstalled) {
+    # ============================================================
+    # 6. .ps1 파일 삭제 (실행 정책 문제 해결)
+    # ============================================================
+    Write-Step ".ps1 파일 정리 중 (실행 정책 문제 방지)..."
+
+    $ps1Files = Get-ChildItem -Path $NpmGlobalPath -Filter "*.ps1" -ErrorAction SilentlyContinue
+    if ($ps1Files) {
+        foreach ($file in $ps1Files) {
+            Remove-Item $file.FullName -Force -ErrorAction SilentlyContinue
+            Write-Info "삭제됨: $($file.Name)"
+        }
+        Write-Success ".ps1 파일 정리 완료"
+    } else {
+        Write-Info ".ps1 파일 없음"
+    }
+
+    # 설치 확인
+    Write-Step "Claude Code 설치 확인 중..."
+
+    if (Test-Path $claudeCmd) {
+        Write-Success "발견: $claudeCmd"
+    } else {
+        Write-Info "$NpmGlobalPath 내용:"
+        Get-ChildItem $NpmGlobalPath -ErrorAction SilentlyContinue | ForEach-Object { Write-Info "  $($_.Name)" }
+
+        # node_modules 확인
+        $nodeModulesPath = "$NpmGlobalPath\node_modules\@anthropic-ai\claude-code"
+        if (Test-Path $nodeModulesPath) {
+            Write-Info "패키지는 설치됨: $nodeModulesPath"
+        } else {
+            Write-Error-Custom "Claude Code 패키지를 찾을 수 없습니다."
+        }
     }
 }
 
