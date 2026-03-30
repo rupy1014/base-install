@@ -38,11 +38,17 @@ function Test-NonAsciiPath {
     return $Path -match '[^\x00-\x7F]'
 }
 
-# PATH 새로고침
+# PATH 새로고침 (레지스트리에서 최신 값을 다시 읽어 현재 세션에 반영)
 function Update-Path {
     $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
     $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
     $env:Path = "$machinePath;$userPath"
+}
+
+# VS Code 터미널 감지
+$isVSCode = $false
+if ($env:TERM_PROGRAM -eq "vscode" -or $env:VSCODE_PID -or $env:VSCODE_CWD) {
+    $isVSCode = $true
 }
 
 # PATH에 영구 추가
@@ -88,6 +94,11 @@ Write-Host "  ╔═════════════════════
 Write-Host "  ║   Claude Code 설치 (한글 경로 지원)      ║" -ForegroundColor Cyan
 Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
+
+if ($isVSCode) {
+    Write-Host "  💡 VS Code 터미널 감지됨 - 설치 완료 후 PATH를 자동 적용합니다." -ForegroundColor Cyan
+    Write-Host ""
+}
 
 # ExecutionPolicy 변경 결과 표시
 if ($policyChanged) {
@@ -438,8 +449,23 @@ Write-Host "  ╔═════════════════════
 Write-Host "  ║            설치 완료! 🎉                 ║" -ForegroundColor Green
 Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Green
 Write-Host ""
-Write-Host "  📌 중요: 새 PowerShell/터미널 창을 열어주세요!" -ForegroundColor Yellow
-Write-Host ""
+
+if ($isVSCode) {
+    Write-Host "  ╔══════════════════════════════════════════╗" -ForegroundColor Yellow
+    Write-Host "  ║  ⚠️  VS Code 터미널에서 설치하셨습니다     ║" -ForegroundColor Yellow
+    Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  VS Code는 실행 시점의 PATH를 캐시하므로," -ForegroundColor Yellow
+    Write-Host "  설치 후에도 'claude'를 못 찾을 수 있습니다." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  아래에서 PATH를 자동 적용했지만, 안 될 경우:" -ForegroundColor White
+    Write-Host "     → VS Code 완전 종료(모든 창) 후 재실행" -ForegroundColor Cyan
+    Write-Host ""
+} else {
+    Write-Host "  📌 중요: 새 PowerShell/터미널 창을 열어주세요!" -ForegroundColor Yellow
+    Write-Host ""
+}
+
 Write-Host "  설치된 명령어:" -ForegroundColor White
 Write-Host "     claude      - Claude Code 실행" -ForegroundColor Gray
 Write-Host "     dsclaude    - 권한 스킵 모드" -ForegroundColor Gray
@@ -449,7 +475,11 @@ Write-Host "     npm 전역: $NpmGlobalPath" -ForegroundColor Gray
 Write-Host "     dsclaude: $ClaudeBinPath" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  시작하기:" -ForegroundColor White
-Write-Host "     1. 새 터미널 열기" -ForegroundColor Gray
+if ($isVSCode) {
+    Write-Host "     1. VS Code 재시작 (또는 위 PATH 명령어 실행)" -ForegroundColor Gray
+} else {
+    Write-Host "     1. 새 터미널 열기" -ForegroundColor Gray
+}
 Write-Host "     2. claude --version" -ForegroundColor Gray
 Write-Host "     3. claude" -ForegroundColor Gray
 Write-Host ""
@@ -472,12 +502,23 @@ if (-not $verifyOk) {
     Write-Host ""
 }
 
-Write-Host "  3초 후 새 PowerShell이 열립니다..." -ForegroundColor Yellow
-Start-Sleep -Seconds 3
+if ($isVSCode) {
+    # VS Code에서는 새 PowerShell 창을 열지 않음 (혼란 방지)
+    # 대신 현재 세션의 PATH를 즉시 갱신
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    Write-Success "현재 터미널 세션의 PATH가 갱신되었습니다."
+    Write-Host ""
+    Write-Host "  지금 바로 claude 를 실행해보세요!" -ForegroundColor Green
+    Write-Host "  (안 되면 VS Code를 완전히 재시작하세요)" -ForegroundColor Gray
+    Write-Host ""
+} else {
+    Write-Host "  3초 후 새 PowerShell이 열립니다..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 3
 
-# 자동으로 새 PowerShell 열기
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "Clear-Host; Write-Host '✅ Claude Code 준비 완료!' -ForegroundColor Green; Write-Host ''; Write-Host '아래 명령어를 입력하세요:' -ForegroundColor White; Write-Host ''; Write-Host '  claude       - Claude Code 실행' -ForegroundColor Cyan; Write-Host '  dsclaude     - 권한 스킵 모드' -ForegroundColor Cyan; Write-Host ''"
+    # 자동으로 새 PowerShell 열기
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "Clear-Host; Write-Host '✅ Claude Code 준비 완료!' -ForegroundColor Green; Write-Host ''; Write-Host '아래 명령어를 입력하세요:' -ForegroundColor White; Write-Host ''; Write-Host '  claude       - Claude Code 실행' -ForegroundColor Cyan; Write-Host '  dsclaude     - 권한 스킵 모드' -ForegroundColor Cyan; Write-Host ''"
 
-Write-Host ""
-Write-Host "  새 PowerShell 창에서 claude 를 입력하세요!" -ForegroundColor Green
-Write-Host ""
+    Write-Host ""
+    Write-Host "  새 PowerShell 창에서 claude 를 입력하세요!" -ForegroundColor Green
+    Write-Host ""
+}
