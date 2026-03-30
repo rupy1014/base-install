@@ -118,25 +118,36 @@ if ($useWinget) {
 }
 
 # 직접 다운로드 함수
-function Install-WithDirectDownload {
+function Download-File {
     param(
         [string]$Name,
         [string]$Url,
-        [string]$OutFile,
-        [string]$Arguments
+        [string]$OutFile
     )
     Write-Info "$Name 다운로드 중: $Url"
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $webClient = New-Object System.Net.WebClient
-        $webClient.DownloadFile($Url, $OutFile)
-        Write-Info "$Name 설치 중... (1-3분 소요)"
-        $proc = Start-Process -FilePath $OutFile -ArgumentList $Arguments -Wait -PassThru
-        return $proc.ExitCode -eq 0
-    } catch {
-        Write-Error-Custom "$Name 다운로드/설치 실패: $_"
-        return $false
-    }
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    (New-Object System.Net.WebClient).DownloadFile($Url, $OutFile)
+}
+
+function Install-Exe {
+    param(
+        [string]$Name,
+        [string]$FilePath,
+        [string]$Arguments
+    )
+    Write-Info "$Name 설치 중... (1-3분 소요)"
+    $proc = Start-Process -FilePath $FilePath -ArgumentList $Arguments -Wait -PassThru
+    return $proc.ExitCode -eq 0
+}
+
+function Install-Msi {
+    param(
+        [string]$Name,
+        [string]$FilePath
+    )
+    Write-Info "$Name 설치 중... (1-3분 소요)"
+    $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$FilePath`" /qn /norestart" -Wait -PassThru
+    return $proc.ExitCode -eq 0
 }
 
 # ============================================================
@@ -155,11 +166,17 @@ if (Test-Command "git") {
     } else {
         Write-Info "Git 직접 다운로드 설치 중..."
         $gitInstaller = "$env:TEMP\Git-installer.exe"
-        Install-WithDirectDownload -Name "Git" `
-            -Url "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.2/Git-2.47.1.2-64-bit.exe" `
-            -OutFile $gitInstaller `
-            -Arguments "/VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /COMPONENTS=`"icons,ext\reg\shellhere,assoc,assoc_sh`"" | Out-Null
-        if (Test-Path $gitInstaller) { Remove-Item $gitInstaller -Force -ErrorAction SilentlyContinue }
+        try {
+            Download-File -Name "Git" `
+                -Url "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.2/Git-2.47.1.2-64-bit.exe" `
+                -OutFile $gitInstaller
+            Install-Exe -Name "Git" -FilePath $gitInstaller `
+                -Arguments "/VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /COMPONENTS=`"icons,ext\reg\shellhere,assoc,assoc_sh`"" | Out-Null
+        } catch {
+            Write-Error-Custom "Git 다운로드/설치 실패: $_"
+        } finally {
+            if (Test-Path $gitInstaller) { Remove-Item $gitInstaller -Force -ErrorAction SilentlyContinue }
+        }
     }
 
     # Git PATH 추가
@@ -200,13 +217,14 @@ if ($nodeExists) {
             winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements --silent 2>$null
         } else {
             $nodeInstaller = "$env:TEMP\node-lts-installer.msi"
-            $nodeUrl = "https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi"
-            Write-Info "Node.js 다운로드 중: $nodeUrl"
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            (New-Object System.Net.WebClient).DownloadFile($nodeUrl, $nodeInstaller)
-            Write-Info "Node.js 설치 중... (1-3분 소요)"
-            Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$nodeInstaller`" /qn /norestart" -Wait
-            if (Test-Path $nodeInstaller) { Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue }
+            try {
+                Download-File -Name "Node.js" -Url "https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi" -OutFile $nodeInstaller
+                Install-Msi -Name "Node.js" -FilePath $nodeInstaller | Out-Null
+            } catch {
+                Write-Error-Custom "Node.js 다운로드/설치 실패: $_"
+            } finally {
+                if (Test-Path $nodeInstaller) { Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue }
+            }
         }
         Update-Path
     }
@@ -217,13 +235,14 @@ if ($nodeExists) {
     } else {
         Write-Info "Node.js LTS 직접 다운로드 설치 중..."
         $nodeInstaller = "$env:TEMP\node-lts-installer.msi"
-        $nodeUrl = "https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi"
-        Write-Info "Node.js 다운로드 중: $nodeUrl"
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        (New-Object System.Net.WebClient).DownloadFile($nodeUrl, $nodeInstaller)
-        Write-Info "Node.js 설치 중... (1-3분 소요)"
-        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$nodeInstaller`" /qn /norestart" -Wait
-        if (Test-Path $nodeInstaller) { Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue }
+        try {
+            Download-File -Name "Node.js" -Url "https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi" -OutFile $nodeInstaller
+            Install-Msi -Name "Node.js" -FilePath $nodeInstaller | Out-Null
+        } catch {
+            Write-Error-Custom "Node.js 다운로드/설치 실패: $_"
+        } finally {
+            if (Test-Path $nodeInstaller) { Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue }
+        }
     }
 
     if (Test-Path "$env:ProgramFiles\nodejs") {
