@@ -145,9 +145,8 @@ function Install-Msi {
         [string]$Name,
         [string]$FilePath
     )
-    Write-Info "$Name 설치 중... (1-3분 소요)"
-    $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$FilePath`" /qn /norestart" -Wait -PassThru
-    return $proc.ExitCode -eq 0
+    Write-Info "$Name 설치 중... (관리자 권한 필요, UAC 팝업이 뜰 수 있습니다)"
+    Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$FilePath`" /qn /norestart" -Verb RunAs -Wait
 }
 
 # ============================================================
