@@ -200,11 +200,12 @@ if ($nodeExists) {
             winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements --silent 2>$null
         } else {
             $nodeInstaller = "$env:TEMP\node-lts-installer.msi"
-            Install-WithDirectDownload -Name "Node.js" `
-                -Url "https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi" `
-                -OutFile $nodeInstaller `
-                -Arguments "/i `"$nodeInstaller`" /qn" | Out-Null
-            Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$nodeInstaller`" /qn" -Wait
+            $nodeUrl = "https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi"
+            Write-Info "Node.js 다운로드 중: $nodeUrl"
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            (New-Object System.Net.WebClient).DownloadFile($nodeUrl, $nodeInstaller)
+            Write-Info "Node.js 설치 중... (1-3분 소요)"
+            Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$nodeInstaller`" /qn /norestart" -Wait
             if (Test-Path $nodeInstaller) { Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue }
         }
         Update-Path
@@ -216,11 +217,12 @@ if ($nodeExists) {
     } else {
         Write-Info "Node.js LTS 직접 다운로드 설치 중..."
         $nodeInstaller = "$env:TEMP\node-lts-installer.msi"
-        Install-WithDirectDownload -Name "Node.js" `
-            -Url "https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi" `
-            -OutFile $nodeInstaller `
-            -Arguments "/i `"$nodeInstaller`" /qn" | Out-Null
-        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$nodeInstaller`" /qn" -Wait
+        $nodeUrl = "https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi"
+        Write-Info "Node.js 다운로드 중: $nodeUrl"
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        (New-Object System.Net.WebClient).DownloadFile($nodeUrl, $nodeInstaller)
+        Write-Info "Node.js 설치 중... (1-3분 소요)"
+        Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$nodeInstaller`" /qn /norestart" -Wait
         if (Test-Path $nodeInstaller) { Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue }
     }
 
