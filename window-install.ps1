@@ -75,7 +75,20 @@ function Resolve-ClaudePath {
     foreach ($c in $candidates) { if (Test-Path $c) { return $c } }
     Update-Path
     $cmd = Get-Command claude -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
+    if ($cmd) {
+        $src = $cmd.Source
+        # .ps1 shim 은 cmd.exe 로 넘기면 메모장(파일 연결)이 떠버림 → 형제 .cmd/.exe 로 치환
+        if ($src -like "*.ps1") {
+            $dir  = Split-Path $src -Parent
+            $base = [System.IO.Path]::GetFileNameWithoutExtension($src)
+            foreach ($ext in @(".exe", ".cmd")) {
+                $sib = Join-Path $dir ($base + $ext)
+                if (Test-Path $sib) { return $sib }
+            }
+            return $null   # .ps1 뿐이면 폴백 설치로 넘겨 깨끗한 .cmd 를 새로 만든다
+        }
+        return $src
+    }
     return $null
 }
 
@@ -85,9 +98,16 @@ function Test-ClaudeRuns {
     $out = [System.IO.Path]::GetTempFileName()
     $err = "$out.err"
     try {
-        # cmd.exe /c 로 감싸 .exe(네이티브) / .cmd(npm) 양쪽 모두 안전하게 실행
-        $p = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$ClaudePath`" --version" `
-             -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+        if ($ClaudePath -like "*.ps1") {
+            # .ps1 을 cmd.exe 로 넘기면 메모장이 뜸 → PowerShell 로 직접 실행
+            $p = Start-Process -FilePath "powershell.exe" `
+                 -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$ClaudePath`" --version" `
+                 -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+        } else {
+            # cmd.exe /c 로 감싸 .exe(네이티브) / .cmd(npm) 양쪽 모두 안전하게 실행
+            $p = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$ClaudePath`" --version" `
+                 -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+        }
         if ($p.WaitForExit(30000)) {
             return ((Get-Content $out -Raw -ErrorAction SilentlyContinue) | Out-String).Trim()
         }
