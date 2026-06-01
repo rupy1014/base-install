@@ -107,6 +107,7 @@ function Install-Msi {
 # ============================================================
 $NpmGlobalPath = "C:\npm-global"
 $CodexBinPath  = "C:\codex-cli\bin"
+$CodexConfigDir = "C:\codex-config"   # 한글 사용자명일 때만 사용 (config.toml/auth 저장 위치)
 
 $isVSCode = ($env:TERM_PROGRAM -eq "vscode" -or $env:VSCODE_PID -or $env:VSCODE_CWD)
 
@@ -127,6 +128,16 @@ if ($policyChanged) {
 if (Test-NonAsciiPath $env:USERPROFILE) {
     Write-Host "  ⚠️  한글 사용자 이름 감지: $env:USERNAME" -ForegroundColor Yellow
     Write-Host "     npm 전역 경로를 $NpmGlobalPath 로 설정합니다 (.npmrc 미접촉)." -ForegroundColor Gray
+    # 한글 홈(C:\Users\<한글>\.codex)에는 config.toml/auth 저장이 실패한다.
+    # CODEX_HOME 을 ASCII 경로로 옮겨 회피 (User 범위 → 새 터미널·omx·dscodex 가 상속).
+    try {
+        if (-not (Test-Path $CodexConfigDir)) { New-Item -ItemType Directory -Path $CodexConfigDir -Force | Out-Null }
+        [Environment]::SetEnvironmentVariable("CODEX_HOME", $CodexConfigDir, "User")
+        $env:CODEX_HOME = $CodexConfigDir
+        Write-Host "     설정 폴더(CODEX_HOME)를 ASCII 경로로 이동: $CodexConfigDir" -ForegroundColor Gray
+    } catch {
+        Write-Host "     설정 폴더 이동 실패: $_" -ForegroundColor Red
+    }
     Write-Host ""
 }
 if ($isVSCode) {
@@ -371,6 +382,7 @@ Write-Host ""
 Write-Host "  설치 경로:" -ForegroundColor White
 Write-Host "     codex   : $codexCmd" -ForegroundColor Gray
 Write-Host "     dscodex : $CodexBinPath" -ForegroundColor Gray
+if ($env:CODEX_HOME) { Write-Host "     설정    : $env:CODEX_HOME (한글 경로 회피)" -ForegroundColor Gray }
 Write-Host ""
 
 Write-Host "  ────────────────────────────────────────────" -ForegroundColor DarkGray

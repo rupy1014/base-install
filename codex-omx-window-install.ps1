@@ -57,6 +57,16 @@ if ($env:TERM_PROGRAM -eq "vscode" -or $env:VSCODE_PID -or $env:VSCODE_CWD) {
 
 $NpmGlobalPath = "C:\npm-global"
 $CodexBinPath = "C:\codex-cli\bin"
+$CodexConfigDir = "C:\codex-config"
+
+# 한글 사용자명: CODEX_HOME 을 ASCII 경로로 (config.toml/auth/omx setup 쓰기 실패 회피).
+# codex-window-install 이 이미 설정했더라도, 같은 창에서 이어 실행하면 세션에
+# 반영이 안 돼 있으므로 여기서 재확인해 omx setup 이 ASCII 경로에 쓰도록 보장한다.
+if ($env:USERPROFILE -match '[^\x00-\x7F]') {
+    if (-not (Test-Path $CodexConfigDir)) { New-Item -ItemType Directory -Path $CodexConfigDir -Force | Out-Null }
+    [Environment]::SetEnvironmentVariable("CODEX_HOME", $CodexConfigDir, "User")
+    $env:CODEX_HOME = $CodexConfigDir
+}
 
 # ============================================================
 # 메인
