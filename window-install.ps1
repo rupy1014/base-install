@@ -361,8 +361,6 @@ if ($claudePath -ieq $nativeExe) {
 $dsclaudeContent = @"
 @echo off
 chcp 65001 >nul 2>&1
-set "DISABLE_AUTOUPDATER=1"
-set "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
 $launcherForCmd --dangerously-skip-permissions %*
 "@
 $dsclaudePath = Join-Path $ClaudeBinPath "dsclaude.cmd"
@@ -375,19 +373,6 @@ if (Test-Path $dsclaudePath) {
 } else {
     Write-Info "dsclaude.cmd 생성 실패 (claude 명령은 정상 사용 가능)"
 }
-
-# ============================================================
-# 5b. 첫 실행 멈춤(행) 방지 — 시작 시 네트워크 호출 비활성화
-#     자동 업데이트/비필수 트래픽이 방화벽·프록시에 막히면 첫 실행이
-#     화면도 안 뜬 채 무한 대기하는 사례가 있어, 비개발자 환경에서
-#     기본으로 꺼 둔다. (claude 기능 자체는 정상, 수동 'claude update' 가능)
-# ============================================================
-Write-Step "첫 실행 멈춤 방지 설정 중..."
-[Environment]::SetEnvironmentVariable("DISABLE_AUTOUPDATER", "1", "User")
-[Environment]::SetEnvironmentVariable("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1", "User")
-$env:DISABLE_AUTOUPDATER = "1"
-$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
-Write-Info "자동 업데이트/비필수 네트워크 비활성화 (DISABLE_AUTOUPDATER=1)"
 
 # ============================================================
 # 6. 최종 검증 (행 방지 타임아웃 포함)
