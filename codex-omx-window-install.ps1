@@ -29,7 +29,7 @@ function Add-ToPathPermanent {
     param([string]$NewPath)
     if (-not (Test-Path $NewPath)) { return $false }
     $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    if ($currentPath -like "*$NewPath*") {
+    if ($currentPath -and ((@($currentPath.Split(';') | Where-Object { $_ -eq $NewPath })).Count -gt 0)) {
         Write-Info "이미 PATH에 존재: $NewPath"
         return $true
     }
@@ -115,6 +115,11 @@ if (-not $npmExists) {
     Read-Host "Enter를 눌러 종료"
     exit 1
 }
+
+# 실제 npm 전역 prefix 조회 (하드코딩 대신 — codex-window-install 이 설정한 위치를 따름)
+$resolvedPrefix = & cmd.exe /c "npm config get prefix" 2>$null
+if ($resolvedPrefix) { $NpmGlobalPath = $resolvedPrefix.Trim() }
+Write-Info "npm 전역 prefix: $NpmGlobalPath"
 
 # Codex CLI 확인
 $codexCmd = "$NpmGlobalPath\codex.cmd"
@@ -231,7 +236,8 @@ chcp 65001 >nul 2>&1
 "@
 
 $dscodexPath = "$CodexBinPath\dscodex.cmd"
-Set-Content -Path $dscodexPath -Value $dscodexContent -Encoding ASCII -Force
+# Default(=시스템 ANSI/CP949) 인코딩 — cmd.exe 가 배치 파일을 읽는 코드페이지와 일치
+Set-Content -Path $dscodexPath -Value $dscodexContent -Encoding Default -Force
 
 if (Test-Path $dscodexPath) {
     Write-Success "dscodex.cmd 생성됨: $dscodexPath"
@@ -340,15 +346,8 @@ if ($isVSCode) {
     Write-Host "  지금 바로 dscodex 를 실행해보세요!" -ForegroundColor Green
     Write-Host "  (안 되면 VS Code를 완전히 재시작하세요)" -ForegroundColor Gray
 } else {
-    Write-Host "  📌 새 PowerShell/터미널 창을 열어주세요!" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  3초 후 새 PowerShell이 열립니다..." -ForegroundColor Yellow
-    Start-Sleep -Seconds 3
-
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "Clear-Host; Write-Host '✅ OMX 준비 완료!' -ForegroundColor Green; Write-Host ''; Write-Host '아래 명령어를 입력하세요:' -ForegroundColor White; Write-Host ''; Write-Host '  dscodex     - omx --madmax --high (풀파워)' -ForegroundColor Cyan; Write-Host '  omx         - oh-my-codex 기본' -ForegroundColor Cyan; Write-Host '  codex       - Codex CLI 기본' -ForegroundColor Cyan; Write-Host ''"
-
-    Write-Host ""
-    Write-Host "  새 PowerShell 창에서 dscodex 를 입력하세요!" -ForegroundColor Green
+    Write-Host "  📌 새 터미널(Windows Terminal 또는 VS Code 통합 터미널)을 열고" -ForegroundColor Yellow
+    Write-Host "     dscodex 를 실행하세요. (codex 미로그인 시 먼저 'codex login')" -ForegroundColor Yellow
 }
 
 Write-Host ""

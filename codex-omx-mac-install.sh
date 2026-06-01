@@ -45,7 +45,7 @@ add_to_shell_configs() {
         if [ ! -f "$rc_file" ]; then
             touch "$rc_file"
         fi
-        if ! grep -q "$marker" "$rc_file" 2>/dev/null; then
+        if ! grep -qF "$marker" "$rc_file" 2>/dev/null; then
             echo "" >> "$rc_file"
             echo "$content" >> "$rc_file"
         fi
@@ -117,8 +117,17 @@ else
     if npm install -g oh-my-codex 2>&1; then
         print_success "oh-my-codex 설치 완료!"
     else
-        print_info "npm 설치 실패 - sudo로 재시도 중..."
-        if sudo npm install -g oh-my-codex 2>&1; then
+        # 권한(EACCES) 등으로 실패 시: sudo 대신 사용자 홈에 npm 전역 prefix 설정 후 재시도 (권장 방식)
+        # sudo npm -g 는 root 소유 파일을 만들어 이후 npm 을 망가뜨리므로 사용하지 않는다.
+        print_info "전역 설치 실패 - 사용자 홈(~/.npm-global)에 전역 경로를 설정하고 재시도합니다 (sudo 미사용)..."
+        export npm_config_prefix="$HOME/.npm-global"
+        mkdir -p "$HOME/.npm-global/bin"
+        export PATH="$HOME/.npm-global/bin:$PATH"
+        for rc_file in "$HOME/.zshrc" "$HOME/.bashrc"; do
+            [ -f "$rc_file" ] || touch "$rc_file"
+            grep -qF '.npm-global/bin' "$rc_file" 2>/dev/null || echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> "$rc_file"
+        done
+        if npm install -g oh-my-codex 2>&1; then
             print_success "oh-my-codex 설치 완료!"
         else
             print_error "oh-my-codex 설치 실패"

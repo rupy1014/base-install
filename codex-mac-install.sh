@@ -58,7 +58,8 @@ setup_bash_profile_source() {
         touch "$HOME/.bash_profile"
     fi
     if ! grep -q "source.*bashrc\|\..*bashrc" "$HOME/.bash_profile" 2>/dev/null; then
-        local temp_file=$(mktemp)
+        local temp_file
+        temp_file=$(mktemp)
         echo '# Load .bashrc if it exists
 [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
 ' > "$temp_file"
@@ -76,7 +77,7 @@ add_to_shell_config() {
     if [ ! -f "$HOME/.zshrc" ]; then
         touch "$HOME/.zshrc"
     fi
-    if ! grep -q "$path_to_add" "$HOME/.zshrc" 2>/dev/null; then
+    if ! grep -qF "$path_to_add" "$HOME/.zshrc" 2>/dev/null; then
         echo "$export_line" >> "$HOME/.zshrc"
     fi
 
@@ -84,7 +85,7 @@ add_to_shell_config() {
     if [ ! -f "$HOME/.bashrc" ]; then
         touch "$HOME/.bashrc"
     fi
-    if ! grep -q "$path_to_add" "$HOME/.bashrc" 2>/dev/null; then
+    if ! grep -qF "$path_to_add" "$HOME/.bashrc" 2>/dev/null; then
         echo "$export_line" >> "$HOME/.bashrc"
     fi
 }
@@ -254,9 +255,14 @@ if [ "$CODEX_INSTALLED" = false ]; then
     if npm install -g @openai/codex 2>&1; then
         CODEX_INSTALLED=true
     else
-        print_info "npm 설치 실패 - 권한 문제일 수 있습니다"
-        print_info "sudo로 재시도 중..."
-        if sudo npm install -g @openai/codex 2>&1; then
+        # 권한(EACCES) 등으로 실패 시: sudo 대신 사용자 홈에 npm 전역 prefix 설정 후 재시도 (권장 방식)
+        # sudo npm -g 는 root 소유 파일을 만들어 이후 npm 을 망가뜨리므로 사용하지 않는다.
+        print_info "전역 설치 실패 - 사용자 홈(~/.npm-global)에 전역 경로를 설정하고 재시도합니다 (sudo 미사용)..."
+        export npm_config_prefix="$HOME/.npm-global"
+        mkdir -p "$HOME/.npm-global/bin"
+        export PATH="$HOME/.npm-global/bin:$PATH"
+        add_to_shell_config "$HOME/.npm-global/bin"
+        if npm install -g @openai/codex 2>&1; then
             CODEX_INSTALLED=true
         fi
     fi
@@ -298,6 +304,7 @@ if [ -n "$CODEX_BIN" ]; then
     if [[ ":$PATH:" != *":$CODEX_DIR:"* ]]; then
         export PATH="$CODEX_DIR:$PATH"
     fi
+    add_to_shell_config "$CODEX_DIR"
     codex_ver=$("$CODEX_BIN" --version 2>/dev/null || echo "installed")
     print_success "Codex CLI 설치 완료! ($codex_ver)"
 else
@@ -339,7 +346,6 @@ reload_shell_config
 # 최종 검증
 FINAL_CHECK_PASSED=true
 FINAL_CODEX_PATH=""
-SHELL_CONFIG_OK=true
 
 # 1. Codex 실행 파일 존재 확인
 if command_exists codex; then
@@ -353,46 +359,22 @@ else
     FINAL_CHECK_PASSED=false
 fi
 
-# 2. 쉘 설정 파일에 PATH가 제대로 추가됐는지 확인
+# 2. 새 셸에서 PATH가 잡히도록 rc 파일에 등록됐는지 확인 (없으면 조용히 자동 복구)
+#    brew/nvm 등 어디에 깔리든 실제 설치 위치(CODEX_DIR)를 기준으로 등록 → 거짓 에러 방지
 CODEX_DIR=$(dirname "$FINAL_CODEX_PATH" 2>/dev/null)
-if [ -n "$CODEX_DIR" ]; then
-    if grep -q "$CODEX_DIR" "$HOME/.zshrc" 2>/dev/null; then
-        print_success "zsh 설정 완료 (~/.zshrc)"
-    else
-        print_error "zsh 설정 누락 (~/.zshrc에 PATH 없음)"
-        SHELL_CONFIG_OK=false
+if [ -n "$CODEX_DIR" ] && [ "$CODEX_DIR" != "." ]; then
+    if ! grep -qF "$CODEX_DIR" "$HOME/.zshrc" 2>/dev/null || ! grep -qF "$CODEX_DIR" "$HOME/.bashrc" 2>/dev/null; then
+        add_to_shell_config "$CODEX_DIR"
+        setup_bash_profile_source
     fi
-
-    if grep -q "$CODEX_DIR" "$HOME/.bashrc" 2>/dev/null; then
-        print_success "bash 설정 완료 (~/.bashrc)"
-    else
-        print_error "bash 설정 누락 (~/.bashrc에 PATH 없음)"
-        SHELL_CONFIG_OK=false
-    fi
-
-    if grep -q "bashrc" "$HOME/.bash_profile" 2>/dev/null; then
-        print_success "bash_profile → bashrc 연결됨"
-    else
-        print_error "bash_profile에서 bashrc를 source하지 않음"
-        SHELL_CONFIG_OK=false
-    fi
+    print_success "셸 PATH 설정 완료 (~/.zshrc, ~/.bashrc)"
 fi
 
 # 3. dscodex 명령어 확인
 if [ -x "$HOME/.local/bin/dscodex" ]; then
     print_success "dscodex 명령어 확인됨"
 else
-    print_error "dscodex 명령어를 찾을 수 없습니다"
-fi
-
-# 쉘 설정 문제가 있으면 자동 복구
-if [ "$SHELL_CONFIG_OK" = false ] && [ -n "$CODEX_DIR" ]; then
-    echo ""
-    print_step "쉘 설정 자동 복구 중..."
-    add_to_shell_config "$CODEX_DIR"
-    setup_bash_profile_source
-    print_success "쉘 설정 복구 완료"
-    SHELL_CONFIG_OK=true
+    print_info "dscodex 명령어를 찾을 수 없습니다 (codex 는 정상 사용 가능)"
 fi
 
 echo ""
@@ -408,14 +390,11 @@ if [ "$FINAL_CHECK_PASSED" = true ]; then
     echo -e "  ${GRAY}  codex login              - 브라우저 로그인${NC}"
     echo -e "  ${GRAY}  codex login --with-api-key - API 키 로그인${NC}"
     echo ""
-    echo ""
-    echo -e "${YELLOW}  3초 후 새 터미널이 열립니다...${NC}"
-    sleep 3
-
-    osascript -e 'tell application "Terminal" to do script ""' -e 'tell application "Terminal" to activate' 2>/dev/null || true
-
-    echo ""
-    echo -e "${GREEN}  새 터미널 창에서 codex 를 입력하세요!${NC}"
+    echo -e "${YELLOW}  올바른 시작 순서:${NC}"
+    echo -e "     1) ${CYAN}새 터미널 창을 연다${NC} (또는 현재 창에서 ${CYAN}source ~/.zshrc${NC})"
+    echo -e "     2) ${CYAN}codex --version${NC}   ← 버전이 뜨면 설치 정상"
+    echo -e "     3) ${CYAN}codex login${NC}       ← 브라우저 로그인"
+    echo -e "     4) ${CYAN}codex${NC}             ← 사용 시작"
     echo ""
 else
     echo -e "${RED}  ╔══════════════════════════════════════════╗${NC}"

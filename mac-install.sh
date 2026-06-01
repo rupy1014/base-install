@@ -4,6 +4,9 @@
 # Claude Code 원클릭 설치 스크립트 (macOS)
 # 완전 자동 설치 - Homebrew 없어도 OK!
 #
+# 설치 순서: Homebrew cask(있으면) → 공식 네이티브 스크립트(없으면)
+# 모든 단계에서 실제 설치 위치를 검증하고, 첫 실행 로그인 안내를 제공합니다.
+#
 
 # ============================================================
 # 콘솔 출력 함수들
@@ -26,6 +29,10 @@ print_success() {
 
 print_error() {
     echo -e "${RED}❌ $1${NC}"
+}
+
+print_warn() {
+    echo -e "${YELLOW}⚠️  $1${NC}"
 }
 
 print_info() {
@@ -61,7 +68,8 @@ setup_bash_profile_source() {
     # .bash_profile에서 .bashrc를 source하는 코드가 없으면 추가
     if ! grep -q "source.*bashrc\|\..*bashrc" "$HOME/.bash_profile" 2>/dev/null; then
         # 파일 맨 앞에 추가 (다른 설정보다 먼저 실행되도록)
-        local temp_file=$(mktemp)
+        local temp_file
+        temp_file=$(mktemp)
         echo '# Load .bashrc if it exists
 [ -f "$HOME/.bashrc" ] && source "$HOME/.bashrc"
 ' > "$temp_file"
@@ -70,7 +78,7 @@ setup_bash_profile_source() {
     fi
 }
 
-# 쉘 설정 파일에 PATH 추가하는 함수
+# 쉘 설정 파일에 PATH 추가하는 함수 (-F: 경로를 고정 문자열로 비교 → 정규식 오탐 방지)
 add_to_shell_config() {
     local path_to_add="$1"
     local export_line="export PATH=\"$path_to_add:\$PATH\""
@@ -79,7 +87,7 @@ add_to_shell_config() {
     if [ ! -f "$HOME/.zshrc" ]; then
         touch "$HOME/.zshrc"
     fi
-    if ! grep -q "$path_to_add" "$HOME/.zshrc" 2>/dev/null; then
+    if ! grep -qF "$path_to_add" "$HOME/.zshrc" 2>/dev/null; then
         echo "$export_line" >> "$HOME/.zshrc"
     fi
 
@@ -88,7 +96,7 @@ add_to_shell_config() {
     if [ ! -f "$HOME/.bashrc" ]; then
         touch "$HOME/.bashrc"
     fi
-    if ! grep -q "$path_to_add" "$HOME/.bashrc" 2>/dev/null; then
+    if ! grep -qF "$path_to_add" "$HOME/.bashrc" 2>/dev/null; then
         echo "$export_line" >> "$HOME/.bashrc"
     fi
 }
@@ -103,6 +111,28 @@ find_brew() {
         return 0
     elif [ -f "/usr/local/bin/brew" ]; then
         echo "/usr/local/bin/brew"
+        return 0
+    fi
+    return 1
+}
+
+# Claude 실행 파일 직접 찾기 (네이티브 → brew 순)
+find_claude() {
+    local paths=(
+        "$HOME/.local/bin/claude"
+        "$HOME/.claude/bin/claude"
+        "/opt/homebrew/bin/claude"
+        "/usr/local/bin/claude"
+    )
+    for p in "${paths[@]}"; do
+        if [ -x "$p" ]; then
+            echo "$p"
+            return 0
+        fi
+    done
+    # PATH 상의 claude (위 표준 경로에 없을 때)
+    if command -v claude &> /dev/null; then
+        command -v claude
         return 0
     fi
     return 1
@@ -153,7 +183,7 @@ if BREW_CMD=$(find_brew); then
     USE_HOMEBREW=true
     eval "$($BREW_CMD shellenv)" 2>/dev/null
 else
-    print_info "Homebrew 없음 - 대안 방법으로 진행"
+    print_info "Homebrew 없음 - 공식 네이티브 스크립트로 진행"
     USE_HOMEBREW=false
 fi
 
@@ -174,74 +204,54 @@ setup_bash_profile_source
 echo ""
 print_step "Claude Code 설치 중..."
 
-CLAUDE_INSTALLED=false
+CLAUDE_BIN=""
 
-# Homebrew로 설치 시도 (있으면)
-if [ "$USE_HOMEBREW" = true ]; then
-    print_info "Homebrew로 설치 중..."
-    if $BREW_CMD install --cask claude-code 2>/dev/null; then
-        CLAUDE_INSTALLED=true
-    fi
-fi
-
-# Homebrew 실패 또는 없으면 공식 스크립트 사용
-if [ "$CLAUDE_INSTALLED" = false ]; then
-    print_info "공식 스크립트로 설치 중..."
-    curl -fsSL https://claude.ai/install.sh | bash
-fi
-
-# PATH 설정
-CLAUDE_PATHS=(
-    "$HOME/.claude/bin"
-    "$HOME/.local/bin"
-)
-
-for claude_path in "${CLAUDE_PATHS[@]}"; do
-    if [ -d "$claude_path" ]; then
-        if [[ ":$PATH:" != *":$claude_path:"* ]]; then
-            export PATH="$claude_path:$PATH"
-        fi
-        # 모든 쉘 설정 파일에 PATH 추가 (zsh, bash 모두 지원)
-        add_to_shell_config "$claude_path"
-    fi
-done
-
-# 쉘 설정 즉시 적용
-reload_shell_config
-
-# Claude 실행 파일 직접 찾기
-find_claude() {
-    local paths=(
-        "$HOME/.claude/bin/claude"
-        "$HOME/.local/bin/claude"
-        "/opt/homebrew/bin/claude"
-        "/usr/local/bin/claude"
-    )
-    for p in "${paths[@]}"; do
-        if [ -x "$p" ]; then
-            echo "$p"
-            return 0
-        fi
-    done
-    return 1
-}
-
-sleep 2
-CLAUDE_BIN=$(find_claude)
+# 4a. 이미 설치돼 있으면 재설치 건너뜀 (멱등)
+CLAUDE_BIN=$(find_claude || true)
 if [ -n "$CLAUDE_BIN" ]; then
-    # PATH에 추가되어 있는지 확인하고, 없으면 추가
+    print_success "이미 설치됨: $CLAUDE_BIN — 설치 건너뜀"
+else
+    # 4b. Homebrew cask 설치 시도 (있으면)
+    if [ "$USE_HOMEBREW" = true ]; then
+        print_info "Homebrew cask로 설치 중... (claude-code)"
+        $BREW_CMD install --cask claude-code || print_info "brew cask 설치 실패 → 네이티브 스크립트로 폴백"
+        CLAUDE_BIN=$(find_claude || true)
+    fi
+
+    # 4c. 아직 없으면 공식 네이티브 스크립트
+    if [ -z "$CLAUDE_BIN" ]; then
+        print_info "공식 네이티브 스크립트로 설치 중..."
+        print_info "curl -fsSL https://claude.ai/install.sh | bash"
+        # pipefail 서브쉘: curl 실패(네트워크/HTTP 오류)를 실제로 감지
+        if ( set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash ); then
+            print_info "네이티브 설치 스크립트 실행 완료"
+        else
+            print_error "네이티브 설치 스크립트 실행 실패 (네트워크/권한 확인 필요)"
+        fi
+        sleep 2
+        CLAUDE_BIN=$(find_claude || true)
+    fi
+fi
+
+# 4d. PATH 등록 (실제 설치 위치 기준 — brew/네이티브 무엇이든 새 셸에서 동작)
+if [ -n "$CLAUDE_BIN" ]; then
     CLAUDE_DIR=$(dirname "$CLAUDE_BIN")
     if [[ ":$PATH:" != *":$CLAUDE_DIR:"* ]]; then
         export PATH="$CLAUDE_DIR:$PATH"
     fi
+    add_to_shell_config "$CLAUDE_DIR"
     claude_ver=$("$CLAUDE_BIN" --version 2>/dev/null || echo "installed")
     print_success "Claude Code 설치 완료! ($claude_ver)"
 else
-    print_error "Claude Code 설치 실패 - 수동 설치가 필요합니다"
-    print_info "https://claude.ai/download 에서 직접 다운로드하세요"
+    print_error "Claude Code 설치를 확인하지 못했습니다."
+    print_info "수동 설치: curl -fsSL https://claude.ai/install.sh | bash"
+    print_info "또는: https://claude.ai/download"
 fi
 
-# 5. dsclaude 명령어 생성
+# 쉘 설정 즉시 적용
+reload_shell_config
+
+# 5. dsclaude 명령어 생성 (권한 확인 스킵 모드)
 echo ""
 print_step "dsclaude 명령어 생성 중..."
 
@@ -258,7 +268,6 @@ chmod +x "$DSCLAUDE_BIN/dsclaude"
 if [[ ":$PATH:" != *":$DSCLAUDE_BIN:"* ]]; then
     export PATH="$DSCLAUDE_BIN:$PATH"
 fi
-# 모든 쉘 설정 파일에 PATH 추가 (zsh, bash 모두 지원)
 add_to_shell_config "$DSCLAUDE_BIN"
 
 print_success "dsclaude 명령어 생성 완료!"
@@ -270,13 +279,10 @@ print_success "dsclaude 명령어 생성 완료!"
 echo ""
 print_step "설치 검증 중..."
 
-# 모든 PATH 다시 한번 적용
 reload_shell_config
 
-# 최종 검증
 FINAL_CHECK_PASSED=true
 FINAL_CLAUDE_PATH=""
-SHELL_CONFIG_OK=true
 
 # 1. Claude 실행 파일 존재 확인
 if command_exists claude; then
@@ -290,49 +296,21 @@ else
     FINAL_CHECK_PASSED=false
 fi
 
-# 2. 쉘 설정 파일에 PATH가 제대로 추가됐는지 확인 (새 터미널에서 작동하려면 필수)
+# 2. 새 셸에서 PATH가 잡히도록 rc 파일에 등록됐는지 확인 (없으면 조용히 자동 복구)
 CLAUDE_DIR=$(dirname "$FINAL_CLAUDE_PATH" 2>/dev/null)
-if [ -n "$CLAUDE_DIR" ]; then
-    # zsh 설정 확인
-    if grep -q "$CLAUDE_DIR" "$HOME/.zshrc" 2>/dev/null; then
-        print_success "zsh 설정 완료 (~/.zshrc)"
-    else
-        print_error "zsh 설정 누락 (~/.zshrc에 PATH 없음)"
-        SHELL_CONFIG_OK=false
+if [ -n "$CLAUDE_DIR" ] && [ "$CLAUDE_DIR" != "." ]; then
+    if ! grep -qF "$CLAUDE_DIR" "$HOME/.zshrc" 2>/dev/null || ! grep -qF "$CLAUDE_DIR" "$HOME/.bashrc" 2>/dev/null; then
+        add_to_shell_config "$CLAUDE_DIR"
+        setup_bash_profile_source
     fi
-
-    # bash 설정 확인
-    if grep -q "$CLAUDE_DIR" "$HOME/.bashrc" 2>/dev/null; then
-        print_success "bash 설정 완료 (~/.bashrc)"
-    else
-        print_error "bash 설정 누락 (~/.bashrc에 PATH 없음)"
-        SHELL_CONFIG_OK=false
-    fi
-
-    # .bash_profile → .bashrc 연결 확인
-    if grep -q "bashrc" "$HOME/.bash_profile" 2>/dev/null; then
-        print_success "bash_profile → bashrc 연결됨"
-    else
-        print_error "bash_profile에서 bashrc를 source하지 않음"
-        SHELL_CONFIG_OK=false
-    fi
+    print_success "셸 PATH 설정 완료 (~/.zshrc, ~/.bashrc)"
 fi
 
 # 3. dsclaude 명령어 확인
 if [ -x "$HOME/.local/bin/dsclaude" ]; then
     print_success "dsclaude 명령어 확인됨"
 else
-    print_error "dsclaude 명령어를 찾을 수 없습니다"
-fi
-
-# 쉘 설정 문제가 있으면 자동 복구 시도
-if [ "$SHELL_CONFIG_OK" = false ] && [ -n "$CLAUDE_DIR" ]; then
-    echo ""
-    print_step "쉘 설정 자동 복구 중..."
-    add_to_shell_config "$CLAUDE_DIR"
-    setup_bash_profile_source
-    print_success "쉘 설정 복구 완료"
-    SHELL_CONFIG_OK=true
+    print_warn "dsclaude 명령어를 찾을 수 없습니다 (claude 는 정상 사용 가능)"
 fi
 
 echo ""
@@ -344,15 +322,17 @@ if [ "$FINAL_CHECK_PASSED" = true ]; then
     echo -e "  ${CYAN}claude${NC}     - Claude Code 실행"
     echo -e "  ${CYAN}dsclaude${NC}   - 권한 확인 스킵 모드"
     echo ""
+    echo -e "${GRAY}  ────────────────────────────────────────────${NC}"
+    echo -e "${YELLOW}  ⚠️  중요 — 'claude' 가 멈춘 것처럼 보이는 이유${NC}"
+    echo -e "${GRAY}  ────────────────────────────────────────────${NC}"
+    echo -e "  첫 실행 시 ${CYAN}claude${NC} 는 '로그인'을 기다립니다."
+    echo -e "${GRAY}  → 멈춘 게 아니라 브라우저 로그인 대기 상태입니다.${NC}"
     echo ""
-    echo -e "${YELLOW}  3초 후 새 터미널이 열립니다...${NC}"
-    sleep 3
-
-    # 자동으로 새 터미널 열기 시도
-    osascript -e 'tell application "Terminal" to do script ""' -e 'tell application "Terminal" to activate' 2>/dev/null || true
-
-    echo ""
-    echo -e "${GREEN}  새 터미널 창에서 claude 를 입력하세요!${NC}"
+    echo -e "${YELLOW}  올바른 시작 순서:${NC}"
+    echo -e "     1) ${CYAN}새 터미널 창을 연다${NC} (또는 현재 창에서 ${CYAN}source ~/.zshrc${NC})"
+    echo -e "     2) ${CYAN}claude --version${NC}   ← 버전이 뜨면 설치 정상 (안 멈춤)"
+    echo -e "     3) ${CYAN}claude${NC}             ← 브라우저 로그인이 뜰 때까지 기다린다"
+    echo -e "${GRAY}        브라우저가 안 열리면 화면의 URL을 복사해 로그인${NC}"
     echo ""
 else
     echo -e "${RED}  ╔══════════════════════════════════════════╗${NC}"
@@ -369,7 +349,6 @@ else
     echo ""
     echo -e "  3. VSCode 터미널에서 안 되면:"
     echo -e "${GRAY}     VSCode 완전 종료 후 다시 열기${NC}"
-    echo -e "${GRAY}     또는 터미널 설정에서 기본 쉘 확인${NC}"
     echo ""
     echo -e "  4. 그래도 안 되면 수동 설치:"
     echo -e "${CYAN}     curl -fsSL https://claude.ai/install.sh | bash${NC}"
