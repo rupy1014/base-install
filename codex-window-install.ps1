@@ -328,7 +328,7 @@ if (-not (Test-Path $CodexBinPath)) { New-Item -ItemType Directory -Path $CodexB
 $dscodexContent = @"
 @echo off
 chcp 65001 >nul 2>&1
-"$codexCmd" --dangerously-bypass-approvals-and-sandbox %*
+call "$codexCmd" --dangerously-bypass-approvals-and-sandbox %*
 "@
 $dscodexPath = Join-Path $CodexBinPath "dscodex.cmd"
 # Default(=시스템 ANSI/CP949) 인코딩 — cmd.exe 가 배치 파일을 읽는 코드페이지와 일치

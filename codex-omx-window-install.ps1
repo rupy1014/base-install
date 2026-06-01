@@ -242,7 +242,7 @@ if (-not (Test-Path $CodexBinPath)) {
 $dscodexContent = @"
 @echo off
 chcp 65001 >nul 2>&1
-"$NpmGlobalPath\omx.cmd" --madmax --high %*
+call "$NpmGlobalPath\omx.cmd" --madmax --high %*
 "@
 
 $dscodexPath = "$CodexBinPath\dscodex.cmd"
@@ -267,7 +267,7 @@ if (-not (Test-Path $PROFILE)) {
     New-Item -ItemType File -Path $PROFILE -Force | Out-Null
 }
 
-$aliasLine = "function dscodex { omx --madmax --high `$args }"
+$aliasLine = "function dscodex { omx --madmax --high @args }"
 $profileContent = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
 
 if ($profileContent -notlike "*function dscodex*") {
