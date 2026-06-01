@@ -137,6 +137,7 @@ function Install-Msi {
 # ============================================================
 $NpmGlobalPath = "C:\npm-global"          # npm 폴백 시에만 사용
 $ClaudeBinPath = "C:\claude-code\bin"     # dsclaude 래퍼
+$ClaudeConfigDir = "C:\claude-config"     # 한글 사용자명일 때만 사용 (설정/신뢰 저장 위치)
 
 $isVSCode = ($env:TERM_PROGRAM -eq "vscode" -or $env:VSCODE_PID -or $env:VSCODE_CWD)
 
@@ -158,6 +159,17 @@ if ($policyChanged) {
 if (Test-NonAsciiPath $env:USERPROFILE) {
     Write-Host "  ⚠️  한글 사용자 이름 감지: $env:USERNAME" -ForegroundColor Yellow
     Write-Host "     네이티브 설치로 npm/.npmrc 문제를 회피합니다." -ForegroundColor Gray
+    # 한글 홈(C:\Users\<한글>\.claude)에는 신뢰/설정 저장이 실패한다
+    # ("신뢰 설정을 저장할 수 없습니다"). 설정 폴더를 ASCII 경로로 이동해 회피.
+    # User 범위 환경변수라 새 터미널의 claude 와 cowork 데스크톱 앱이 모두 상속한다.
+    try {
+        if (-not (Test-Path $ClaudeConfigDir)) { New-Item -ItemType Directory -Path $ClaudeConfigDir -Force | Out-Null }
+        [Environment]::SetEnvironmentVariable("CLAUDE_CONFIG_DIR", $ClaudeConfigDir, "User")
+        $env:CLAUDE_CONFIG_DIR = $ClaudeConfigDir
+        Write-Host "     설정 폴더를 ASCII 경로로 이동: $ClaudeConfigDir" -ForegroundColor Gray
+    } catch {
+        Write-Host "     설정 폴더 이동 실패: $_" -ForegroundColor Red
+    }
     Write-Host ""
 }
 
@@ -397,6 +409,10 @@ Write-Host ""
 Write-Host "  설치 방식 : $installVia" -ForegroundColor White
 Write-Host "  claude    : $claudePath" -ForegroundColor Gray
 Write-Host "  dsclaude  : 권한 스킵 모드 ($ClaudeBinPath)" -ForegroundColor Gray
+if ($env:CLAUDE_CONFIG_DIR) {
+    Write-Host "  설정 폴더 : $env:CLAUDE_CONFIG_DIR (한글 경로 회피)" -ForegroundColor Gray
+    Write-Host "             ※ cowork 데스크톱 앱이 실행 중이면 완전히 종료 후 다시 여세요." -ForegroundColor DarkGray
+}
 Write-Host ""
 
 Write-Host "  ────────────────────────────────────────────" -ForegroundColor DarkGray
